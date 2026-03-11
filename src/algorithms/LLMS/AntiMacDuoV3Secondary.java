@@ -9,6 +9,7 @@ public class AntiMacDuoV3Secondary extends ClaudeUtils {
     private static final double[] STAGE_Y = {230.0, 1770.0};
     private static final double FIRE_SPREAD = 0.12;
     private double sx, sy;
+    private int noFireTicks = 0;
 
     @Override
     public void activate() {
@@ -82,9 +83,18 @@ public class AntiMacDuoV3Secondary extends ClaudeUtils {
         broadcast("POS " + id + " " + myX + " " + myY + " " + getHeading());
 
         TrackedEnemy t = chooseTarget();
-        if (tryFire(t)) broadcast("FOCUS " + (int) t.x + " " + (int) t.y);
+        boolean fired = tryFire(t);
+        if (t != null) {
+            if (fired) {
+                noFireTicks = 0;
+                broadcast("FOCUS " + (int) t.x + " " + (int) t.y);
+            } else {
+                noFireTicks++;
+                if (noFireTicks % 8 == 0) broadcast("FOCUS " + (int) t.x + " " + (int) t.y);
+            }
+        } else noFireTicks = 0;
 
-        if (!isAvoiding() && state != S.DEAD) state = enemies.isEmpty() ? S.ADVANCING : S.FIRING;
+        if (!isAvoiding() && state != S.DEAD) state = enemies.isEmpty() ? S.ADVANCING : (noFireTicks > 20 ? S.FLANKING : S.FIRING);
 
         switch (state) {
             case ADVANCING:
@@ -92,6 +102,9 @@ public class AntiMacDuoV3Secondary extends ClaudeUtils {
                 break;
             case FIRING:
                 skirmish();
+                break;
+            case FLANKING:
+                clearShotReposition();
                 break;
             case TURN_LEFT:
             case TURN_RIGHT:
@@ -103,7 +116,11 @@ public class AntiMacDuoV3Secondary extends ClaudeUtils {
         }
 
         t = chooseTarget();
-        if (tryFire(t)) broadcast("FOCUS " + (int) t.x + " " + (int) t.y);
+        fired = tryFire(t);
+        if (t != null && fired) {
+            noFireTicks = 0;
+            broadcast("FOCUS " + (int) t.x + " " + (int) t.y);
+        }
     }
 
     private void skirmish() {
@@ -131,5 +148,15 @@ public class AntiMacDuoV3Secondary extends ClaudeUtils {
             double tang = base - Math.PI / 2.0;
             if (!isFacing(tang)) stepTurnTo(tang); else doMove(true);
         }
+    }
+
+    private void clearShotReposition() {
+        TrackedEnemy t = chooseTarget();
+        if (t == null) return;
+        double base = Math.atan2(t.y - myY, t.x - myX);
+        double side = NBOT.equals(id) ? 1.0 : -1.0;
+        double angle = base + side * Math.PI / 3.0;
+        if (!isFacing(angle)) stepTurnTo(angle);
+        else doMove(true);
     }
 }
