@@ -9,6 +9,8 @@ public class AntiMacDuoV3Secondary extends ClaudeUtils {
     private static final double STAGE_X_A = 1780.0, STAGE_X_B = 1220.0;
     private static final double[] STAGE_Y = {230.0, 1770.0};
     private static final double FIRE_SPREAD = 0.12;
+    private static final int LOW_HP_RETREAT_THRESHOLD = 35;
+    private static final double LOW_HP_RETREAT_RANGE = 520.0;
     private double sx, sy;
     private int noFireTicks = 0;
 
@@ -129,6 +131,14 @@ public class AntiMacDuoV3Secondary extends ClaudeUtils {
         if (t == null) return;
         double d = Math.hypot(t.x - myX, t.y - myY);
         double base = Math.atan2(t.y - myY, t.x - myX);
+
+        // When low HP, prioritize disengaging to preserve focus/broadcast utility.
+        if (getHealth() <= LOW_HP_RETREAT_THRESHOLD && d < LOW_HP_RETREAT_RANGE) {
+            double away = normA(base + Math.PI);
+            if (!isFacing(away)) stepTurnTo(away);
+            else doMove(true);
+            return;
+        }
 
         if (NBOT.equals(id)) {
             if (d > 700) {
