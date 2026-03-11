@@ -8,7 +8,7 @@ logs/
 # Build output
 beans/
 out/
-
+beans
 # IDE
 .idea/
 *.iml
@@ -28,6 +28,8 @@ out/
 *.zip
 *.tar.gz
 *.rar
+# Exception: keep simulator.jar (needed to compile)
+!jars/simulator.jar
 
 # Virtual machine crash logs
 hs_err_pid*
