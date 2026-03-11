@@ -1,12 +1,12 @@
 # Latest benchmark report
 
-Date: 2026-03-12 00:33 (Europe/Paris)
+Date: 2026-03-12 00:37 (Europe/Paris)
 Branch: `agent/v2`
-Commit tested: `9052db7`
+Commit tested: `a510718`
 
 ## Iteration
-- Change: rebalanced secondary adherence to allied `FOCUS` calls after aggressive-focus regression.
-- Targeting tweak in `AntiMacDuoV3Secondary`: focus radius `160 -> 150`, focus bonus `110 -> 85`.
+- Change: added a distance guardrail to `FOCUS`-driven target priority in `AntiMacDuoV3Secondary`.
+- Logic: focus bonus applies only if target is both near focus point and within 780 range of current secondary position.
 - File touched: `src/algorithms/LLMS/AntiMacDuoV3Secondary.java`
 
 ## Tournament protocol
@@ -21,23 +21,23 @@ Commit tested: `9052db7`
 - Baselines:
   1. `algorithms.external.MacDuoMain` + `algorithms.external.MacDuoSecondary`
   2. `algorithms.LLMS.AntiMacDuoV2Main` + `algorithms.LLMS.AntiMacDuoV2Secondary`
-- Additional cross-baseline check included by bench: MacDuo vs V2.
+- Baseline cross-check included: MacDuo vs V2.
 
 ## Results (smoke)
 - Candidate vs MacDuo (AB+BA, 4 matches): **0W / 4L / 0D**, avg candidate score **0.042**
 - Candidate vs AntiMacDuoV2 (AB+BA, 4 matches): **0W / 4L / 0D**, avg candidate score **0.101**
-- Global (candidate, 8 matches): **0W / 8L / 0D**, winrate **0%**
+- Global (candidate, 8 matches): **0W / 8L / 0D**, avg candidate score **0.072**
 
-Cross-check baseline strength:
+Baseline cross-check:
 - MacDuo vs V2 (AB+BA, 4 matches): **4W / 0L / 0D** for MacDuo.
 
 ## Comparison with previous iteration
-- Previous (commit `8c3d6fc`, aggressive focus): **0W/8L**, avg score **0.060**.
-- Current (commit `9052db7`, balanced focus): **0W/8L**, avg score around **0.072** over candidate pairings.
-- Net effect: small score recovery but no win recovery; candidate remains below V2 and far below MacDuo.
+- Previous (`9052db7`, balanced focus): **0W/8L**, avg candidate score **0.072**.
+- Current (`a510718`, focus distance guardrail): **0W/8L**, avg candidate score **0.072**.
+- Net effect: no measurable improvement on this smoke set.
 
 ## Verdict
-Balanced focus rollback reduces the prior over-commit damage but still fails to recover competitiveness. Keep as non-promoted experimental state.
+Distance guardrail is neutral in current mini-tournament conditions. Keep as tested candidate but not promoted.
 
 ## Artifacts
 - `mini_summary.md`
