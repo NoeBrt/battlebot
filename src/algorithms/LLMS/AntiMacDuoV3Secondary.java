@@ -46,7 +46,8 @@ public class AntiMacDuoV3Secondary extends ClaudeUtils {
             boolean sec = (e.type == characteristics.IRadarResult.Types.OpponentSecondaryBot);
             double pri = sec ? 110.0 : 15.0;
             if (NBOT.equals(id)) pri += 20.0;
-            if (!Double.isNaN(focusX) && Math.hypot(e.x - focusX, e.y - focusY) < 140.0) pri += 70.0;
+            // Stronger main/secondary coordination: commit harder to allied focus calls.
+            if (!Double.isNaN(focusX) && Math.hypot(e.x - focusX, e.y - focusY) < 160.0) pri += 110.0;
             double sc = pri - d;
             if (sc > bestScore) {
                 bestScore = sc;
