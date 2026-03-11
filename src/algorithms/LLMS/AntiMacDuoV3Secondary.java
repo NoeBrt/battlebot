@@ -5,8 +5,8 @@ import characteristics.Parameters;
 
 /** AntiMacDuoV3Secondary: V2 scout/harass split + safer multi-angle firing. */
 public class AntiMacDuoV3Secondary extends ClaudeUtils {
-    // Push scouts deeper so mains get forward target cues sooner.
-    private static final double STAGE_X_A = 2100.0, STAGE_X_B = 900.0;
+    // Partial rollback from deep-scout experiment: still advanced, but less overextended.
+    private static final double STAGE_X_A = 1780.0, STAGE_X_B = 1220.0;
     private static final double[] STAGE_Y = {230.0, 1770.0};
     private static final double FIRE_SPREAD = 0.12;
     private double sx, sy;
