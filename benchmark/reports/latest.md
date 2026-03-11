@@ -1,11 +1,12 @@
 # Latest benchmark report
 
-Date: 2026-03-11 23:57 (Europe/Paris)
+Date: 2026-03-12 00:06 (Europe/Paris)
 Branch: `agent/v2`
-Commit tested: `7b18add`
+Commit tested: `79d2c08`
 
 ## Iteration
-- Change: `AntiMacDuoV3Secondary` staging depth increased (`STAGE_X_A=2100`, `STAGE_X_B=900`) to push scouts deeper and provide earlier target cues.
+- Change: partial rollback of `AntiMacDuoV3Secondary` deep-scout staging.
+- New staging values: `STAGE_X_A=1780`, `STAGE_X_B=1220`.
 - File touched: `src/algorithms/LLMS/AntiMacDuoV3Secondary.java`
 
 ## Tournament protocol
@@ -22,16 +23,16 @@ Commit tested: `7b18add`
   2. `algorithms.LLMS.AntiMacDuoV2Main` + `algorithms.LLMS.AntiMacDuoV2Secondary`
 
 ## Results (smoke)
-- Candidate vs MacDuo (AB+BA, 4 matches): **0 win / 4 losses**
-- Candidate vs AntiMacDuoV2 (AB+BA, 4 matches): **0 win / 4 losses**
-- Global: **0/8 wins**
+- Candidate vs MacDuo (AB+BA, 4 matches): **0W / 4L / 0D**, avg candidate score **0.021**
+- Candidate vs AntiMacDuoV2 (AB+BA, 4 matches): **2W / 2L / 0D**, avg candidate score **0.109**
+- Global (8 matches): **2W / 6L / 0D**, avg candidate score **0.065**
 
 ## Verdict
-Deep-scout staging regression on this smoke set. Keep as failed experimental candidate; do not promote.
+Partial rollback improves results versus V2 but remains clearly below MacDuo baseline. Keep as experimental candidate (not promoted).
 
 ## Artifacts
-- `benchmark_tmp/mini_tournament_20260311_235143_antimacduov3_deepscout/mini_summary.md`
-- `benchmark_tmp/mini_tournament_20260311_235143_antimacduov3_deepscout/cand_vs_macduo_AB/match_20260311_235143.log`
-- `benchmark_tmp/mini_tournament_20260311_235143_antimacduov3_deepscout/cand_vs_macduo_BA/match_20260311_235246.log`
-- `benchmark_tmp/mini_tournament_20260311_235143_antimacduov3_deepscout/cand_vs_v2_AB/match_20260311_235339.log`
-- `benchmark_tmp/mini_tournament_20260311_235143_antimacduov3_deepscout/cand_vs_v2_BA/match_20260311_235442.log`
+- `logs/mini_tournoi_rollback_v3_20260312_000046/mini_summary.md`
+- `logs/mini_tournoi_rollback_v3_20260312_000046/vs_macduo_AB/match_20260312_000046.log`
+- `logs/mini_tournoi_rollback_v3_20260312_000046/vs_macduo_BA/match_20260312_000150.log`
+- `logs/mini_tournoi_rollback_v3_20260312_000046/vs_v2_AB/match_20260312_000240.log`
+- `logs/mini_tournoi_rollback_v3_20260312_000046/vs_v2_BA/match_20260312_000344.log`
