@@ -2,6 +2,9 @@ package supportGUI;
 
 import robotsimulator.Bot;
 import robotsimulator.SimulatorEngine;
+import characteristics.Parameters;
+
+import characteristics.Parameters;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -49,6 +52,16 @@ public class HeadlessMatchRunner {
         System.out.println("Logging details to: " + logFile.getAbsolutePath());
         logBoth("=== Headless Match Run ===");
         logBoth(String.format("matches=%d timeout=%dms delay=%dms", n, timeoutMs, delayMs));
+        logBoth(String.format("TeamA strategies: main=%s secondary=%s",
+                Parameters.teamAMainBotBrainClassName,
+                Parameters.teamASecondaryBotBrainClassName));
+        logBoth(String.format("TeamB strategies: main=%s secondary=%s",
+                Parameters.teamBMainBotBrainClassName,
+                Parameters.teamBSecondaryBotBrainClassName));
+        logBoth("Team A (" + Parameters.teamAName + "): Main=" + Parameters.teamAMainBotBrainClassName
+                + "  Secondary=" + Parameters.teamASecondaryBotBrainClassName);
+        logBoth("Team B (" + Parameters.teamBName + "): Main=" + Parameters.teamBMainBotBrainClassName
+                + "  Secondary=" + Parameters.teamBSecondaryBotBrainClassName);
 
         double[] diffs = new double[n];
         int winsA = 0, winsB = 0, draws = 0;
