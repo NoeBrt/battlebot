@@ -169,7 +169,7 @@ public class AntiMacDuoV3Secondary extends ClaudeUtils {
         if (t == null) return;
         double base = Math.atan2(t.y - myY, t.x - myX);
         double side = NBOT.equals(id) ? 1.0 : -1.0;
-        double angle = base + side * Math.PI / 3.0;
+        double angle = base + side * Math.PI / 2.5;
         if (!isFacing(angle)) stepTurnTo(angle);
         else doMove(true);
     }
