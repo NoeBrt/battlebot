@@ -1,6 +1,6 @@
 # Latest benchmark report
 
-Date: 2026-03-12 11:36 (Europe/Paris)
+Date: 2026-03-12 11:39 (Europe/Paris)
 Branch: `agent/v2`
 Commit tested: `037235c`
 
@@ -24,23 +24,23 @@ Commit tested: `037235c`
 
 ## Results
 - AB (MacDuo A vs Ultra B, 10 matches):
-  - W/L/D Team A: **10 / 0 / 0**
-  - avg scores: **A=0.746**, **B=0.037**
+  - Ultra (Team B) = **0W / 9L / 1D**
+  - avg scores: **A=0.582**, **B=0.051**
 - BA (Ultra A vs MacDuo B, 10 matches):
-  - W/L/D Team A: **0 / 10 / 0**
-  - avg scores: **A=0.032**, **B=0.701**
+  - Ultra (Team A) = **0W / 8L / 2D**
+  - avg scores: **A=0.062**, **B=0.632**
 
 ### Aggregated (20 matches)
-- **MacDuoUltra:** **0W / 20L / 0D** (0%)
-- **MacDuo normal:** **20W / 0L / 0D** (100%)
+- **MacDuoUltra:** **0W / 17L / 3D**
+- **MacDuo normal:** **17W / 0L / 3D**
 - Mean score over all matches:
-  - Ultra: **0.034**
-  - MacDuo: **0.724**
+  - Ultra: **0.057**
+  - MacDuo: **0.607**
 
 ## Verdict
-MacDuoUltra is currently non-competitive versus baseline MacDuo (complete sweep by MacDuo in both AB and BA). Keep as exploratory external candidate; do not promote.
+MacDuoUltra remains clearly below baseline MacDuo. Some draws appear, but no wins in 20 matches. Keep as exploratory external candidate; do not promote.
 
 ## Artifacts
-- `logs/mini_tournoi_macduoultra_vs_macduo_20260312_113124/mini_summary.md`
-- `logs/mini_tournoi_macduoultra_vs_macduo_20260312_113124/AB_macduo_vs_ultra/match_20260312_113125.log`
-- `logs/mini_tournoi_macduoultra_vs_macduo_20260312_113124/BA_ultra_vs_macduo/match_20260312_113734.log`
+- `logs/mini_tournoi_ultra_037235c_20260312_112749/mini_summary.md`
+- `logs/mini_tournoi_ultra_037235c_20260312_112749/AB/match_20260312_112750.log`
+- `logs/mini_tournoi_ultra_037235c_20260312_112749/BA/match_20260312_113257.log`
