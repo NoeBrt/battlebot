@@ -1,13 +1,12 @@
 # Latest benchmark report
 
-Date: 2026-03-12 09:10 (Europe/Paris)
+Date: 2026-03-12 09:16 (Europe/Paris)
 Branch: `agent/v2`
-Commit tested: `51d14b2`
+Commit tested: `3e7ce22`
 
 ## Iteration
-- Change: increased enemy-secondary target priority in `AntiMacDuoV3Main`.
-- Tweak: secondary priority `140 -> 170` in target scoring.
-- Goal: apply stronger pressure on enemy support units (especially vs MacDuo).
+- Change: tightened V3 main maximum kiting range (`MAX_R 720 -> 680`) while keeping `MIN_R=360`.
+- Goal: reduce over-kiting and force more meaningful engagements.
 - File touched: `src/algorithms/LLMS/AntiMacDuoV3Main.java`
 
 ## Tournament protocol
@@ -29,16 +28,16 @@ Commit tested: `51d14b2`
 - Global (candidate, 8 matches): **0W / 6L / 2D**, avg candidate score **0.061**
 
 ## Comparison with previous iteration
-- Previous (`269474a`, main kiting MIN_R=360): **1W/5L/2D**, avg score **0.060**.
-- Current (`51d14b2`, secondary-priority boost): **0W/6L/2D**, avg score **0.061**.
-- Net effect: slight score uptick, but no wins and no improvement vs MacDuo.
+- Previous (`51d14b2`, higher secondary target priority): **0W/6L/2D**, avg score **0.061**.
+- Current (`3e7ce22`, tighter MAX_R): **0W/6L/2D**, avg score **0.061**.
+- Net effect: no measurable change on this smoke set.
 
 ## Verdict
-Higher secondary-priority alone is insufficient. Keeps V3 marginally stable vs V2 (draws) but does not convert into wins and remains weak vs MacDuo.
+Tightening max kiting range alone is neutral under current conditions. Keep as tested but non-promoted candidate.
 
 ## Artifacts
-- `logs/mini_tournoi_v3_secondaryprio_20260312_090618/mini_summary.md`
-- `logs/mini_tournoi_v3_secondaryprio_20260312_090618/vs_macduo_AB/match_20260312_090618.log`
-- `logs/mini_tournoi_v3_secondaryprio_20260312_090618/vs_macduo_BA/match_20260312_090651.log`
-- `logs/mini_tournoi_v3_secondaryprio_20260312_090618/vs_v2_AB/match_20260312_090748.log`
-- `logs/mini_tournoi_v3_secondaryprio_20260312_090618/vs_v2_BA/match_20260312_090850.log`
+- `logs/mini_tournoi_v3_tightermaxr_20260312_091223/mini_summary.md`
+- `logs/mini_tournoi_v3_tightermaxr_20260312_091223/vs_macduo_AB/match_20260312_091223.log`
+- `logs/mini_tournoi_v3_tightermaxr_20260312_091223/vs_macduo_BA/match_20260312_091256.log`
+- `logs/mini_tournoi_v3_tightermaxr_20260312_091223/vs_v2_AB/match_20260312_091353.log`
+- `logs/mini_tournoi_v3_tightermaxr_20260312_091223/vs_v2_BA/match_20260312_091455.log`
