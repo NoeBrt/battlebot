@@ -40,7 +40,8 @@ public class AntiMacDuoV3Main extends ClaudeUtils {
         for (TrackedEnemy e : enemies) {
             double d = Math.hypot(e.x - myX, e.y - myY);
             boolean sec = e.type == characteristics.IRadarResult.Types.OpponentSecondaryBot;
-            double pri = sec ? 140.0 : 10.0;
+            // Push harder on enemy secondaries to reduce MacDuo support pressure.
+            double pri = sec ? 170.0 : 10.0;
             if (M3.equals(id) && !sec) pri += 45.0;
             if (!Double.isNaN(focusX) && Math.hypot(e.x - focusX, e.y - focusY) < 140.0) pri += 80.0;
             double score = pri - d;
