@@ -1,12 +1,13 @@
 # Latest benchmark report
 
-Date: 2026-03-12 09:02 (Europe/Paris)
+Date: 2026-03-12 09:10 (Europe/Paris)
 Branch: `agent/v2`
-Commit tested: `269474a`
+Commit tested: `51d14b2`
 
 ## Iteration
-- Change: widened V3 main kiting bubble by increasing `MIN_R` from `320` to `360` in `AntiMacDuoV3Main`.
-- Goal: reduce close-range trades and survive longer in main-bot duels.
+- Change: increased enemy-secondary target priority in `AntiMacDuoV3Main`.
+- Tweak: secondary priority `140 -> 170` in target scoring.
+- Goal: apply stronger pressure on enemy support units (especially vs MacDuo).
 - File touched: `src/algorithms/LLMS/AntiMacDuoV3Main.java`
 
 ## Tournament protocol
@@ -23,21 +24,21 @@ Commit tested: `269474a`
   2. `algorithms.LLMS.AntiMacDuoV2Main` + `algorithms.LLMS.AntiMacDuoV2Secondary`
 
 ## Results (smoke)
-- Candidate vs MacDuo (AB+BA, 4 matches): **0W / 4L / 0D**, avg candidate score **0.014**
-- Candidate vs AntiMacDuoV2 (AB+BA, 4 matches): **1W / 1L / 2D**, avg candidate score **0.105**
-- Global (candidate, 8 matches): **1W / 5L / 2D**, avg candidate score **0.060**
+- Candidate vs MacDuo (AB+BA, 4 matches): **0W / 4L / 0D**, avg candidate score **0.021**
+- Candidate vs AntiMacDuoV2 (AB+BA, 4 matches): **0W / 2L / 2D**, avg candidate score **0.101**
+- Global (candidate, 8 matches): **0W / 6L / 2D**, avg candidate score **0.061**
 
 ## Comparison with previous iteration
-- Previous (`a510718`, focus-distance guardrail): **0W/8L/0D**, avg candidate score **0.072**.
-- Current (`269474a`, main MIN_R increased): **1W/5L/2D**, avg candidate score **0.060**.
-- Net effect: better W/L profile thanks to draws and one win vs V2, but weaker average score and still dominated by MacDuo.
+- Previous (`269474a`, main kiting MIN_R=360): **1W/5L/2D**, avg score **0.060**.
+- Current (`51d14b2`, secondary-priority boost): **0W/6L/2D**, avg score **0.061**.
+- Net effect: slight score uptick, but no wins and no improvement vs MacDuo.
 
 ## Verdict
-Main kiting radius increase improves stability against V2 but does not address MacDuo matchup. Keep as experimental candidate; combine with stronger anti-MacDuo targeting/positioning changes next.
+Higher secondary-priority alone is insufficient. Keeps V3 marginally stable vs V2 (draws) but does not convert into wins and remains weak vs MacDuo.
 
 ## Artifacts
-- `logs/mini_tournoi_main_kiting_20260312_085757/mini_summary.md`
-- `logs/mini_tournoi_main_kiting_20260312_085757/vs_macduo_AB/match_20260312_085758.log`
-- `logs/mini_tournoi_main_kiting_20260312_085757/vs_macduo_BA/match_20260312_085828.log`
-- `logs/mini_tournoi_main_kiting_20260312_085757/vs_v2_AB/match_20260312_085925.log`
-- `logs/mini_tournoi_main_kiting_20260312_085757/vs_v2_BA/match_20260312_090027.log`
+- `logs/mini_tournoi_v3_secondaryprio_20260312_090618/mini_summary.md`
+- `logs/mini_tournoi_v3_secondaryprio_20260312_090618/vs_macduo_AB/match_20260312_090618.log`
+- `logs/mini_tournoi_v3_secondaryprio_20260312_090618/vs_macduo_BA/match_20260312_090651.log`
+- `logs/mini_tournoi_v3_secondaryprio_20260312_090618/vs_v2_AB/match_20260312_090748.log`
+- `logs/mini_tournoi_v3_secondaryprio_20260312_090618/vs_v2_BA/match_20260312_090850.log`
