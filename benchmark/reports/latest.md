@@ -1,13 +1,13 @@
 # Latest benchmark report
 
-Date: 2026-03-12 09:35 (Europe/Paris)
+Date: 2026-03-12 09:42 (Europe/Paris)
 Branch: `agent/v2`
-Commit tested: `2b05262`
+Commit tested: `0641916`
 
 ## Iteration
-- Change: secondary low-HP retreat triggers earlier in `AntiMacDuoV3Secondary`.
-- Tweak: `LOW_HP_RETREAT_THRESHOLD 35 -> 45`.
-- Goal: improve secondary survivability and maintain focus/broadcast utility.
+- Change: widened secondary clear-shot flank reposition angle in `AntiMacDuoV3Secondary`.
+- Tweak: `angle = base + side * PI/3` -> `angle = base + side * PI/2.5`.
+- Goal: produce more decisive lateral separation before re-engaging.
 - File touched: `src/algorithms/LLMS/AntiMacDuoV3Secondary.java`
 
 ## Tournament protocol
@@ -24,20 +24,21 @@ Commit tested: `2b05262`
   2. `algorithms.LLMS.AntiMacDuoV2Main` + `algorithms.LLMS.AntiMacDuoV2Secondary`
 
 ## Results (smoke)
-- Candidate vs MacDuo (AB+BA, 4 matches): **0W / 4L / 0D**, avg candidate score **0.038**
-- Candidate vs AntiMacDuoV2 (AB+BA, 4 matches): **0W / 4L / 0D**, avg candidate score **0.105**
-- Global (candidate, 8 matches): **0W / 8L / 0D**, avg candidate score **0.072**
+- Candidate vs MacDuo (AB+BA, 4 matches): **0W / 4L / 0D**, avg candidate score **0.021**
+- Candidate vs AntiMacDuoV2 (AB+BA, 4 matches): **0W / 2L / 2D**, avg candidate score **0.101**
+- Global (candidate, 8 matches): **0W / 6L / 2D**, avg candidate score **0.061**
 
 ## Comparison with previous iteration
-- Previous (`bb43e17`, distance-adaptive secondary priority): **0W/8L/0D**, avg score **0.073**.
-- Current (`2b05262`, earlier low-HP retreat): **0W/8L/0D**, avg score **0.072**.
-- Net effect: no outcome improvement and slight score regression.
+- Previous (`2b05262`, low-HP retreat threshold 45): **0W/8L/0D**, avg score **0.072**.
+- Current (`0641916`, wider flank angle): **0W/6L/2D**, avg score **0.061**.
+- Net effect: better match outcomes vs V2 (draws restored), but lower score average and still no wins.
 
 ## Verdict
-Earlier low-HP retreat alone does not improve matchup quality. Keep as tested, non-promoted variant.
+Wider flank angle is a mild stability gain versus V2 but does not solve conversion or MacDuo matchup. Keep as experimental candidate; not promoted.
 
 ## Artifacts
-- `logs/mini_v3_threshold/MacDuo/AB/match_20260312_093052.log`
-- `logs/mini_v3_threshold/MacDuo/BA/match_20260312_093149.log`
-- `logs/mini_v3_threshold/AntiMacDuoV2/AB/match_20260312_093240.log`
-- `logs/mini_v3_threshold/AntiMacDuoV2/BA/match_20260312_093342.log`
+- `logs/mini_tournoi_v3_flankangle_20260312_094036/mini_summary.md`
+- `logs/mini_tournoi_v3_flankangle_20260312_094036/vs_macduo_AB/match_20260312_094037.log`
+- `logs/mini_tournoi_v3_flankangle_20260312_094036/vs_macduo_BA/match_20260312_094140.log`
+- `logs/mini_tournoi_v3_flankangle_20260312_094036/vs_v2_AB/match_20260312_094241.log`
+- `logs/mini_tournoi_v3_flankangle_20260312_094036/vs_v2_BA/match_20260312_094343.log`
