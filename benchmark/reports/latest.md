@@ -1,15 +1,15 @@
 # Latest benchmark report
 
-Date: 2026-03-13 06:50 (Europe/Paris)
+Date: 2026-03-13 07:05 (Europe/Paris)
 Branch: `agent/v2`
-Commit tested: `9fb46da`
+Commit tested: `c7d8740`
 
 ## Iteration
-- Change: rollback of earlier flanking trigger in `AntiMacDuoV3Main`.
+- Change: increased M3 pressure bonus against main targets.
 - File modified:
   - `src/algorithms/LLMS/AntiMacDuoV3Main.java`
 - Parameter:
-  - flanking trigger: `noFireTicks > 22 -> > 25`
+  - `M3 main-target bonus: +45 -> +55`
 
 ## Tournament protocol
 - Runner: sub-agent `bench`
@@ -27,30 +27,31 @@ Commit tested: `9fb46da`
 
 ### Per leg
 - vs MacDuo AB: **0W / 2L / 0D**, winrate 0.0%, avg score **0.022** vs **0.800**
-- vs MacDuo BA: **0W / 2L / 0D**, winrate 0.0%, avg score **0.101** vs **0.652**
-- vs AntiMacDuoV2 AB: **0W / 2L / 0D**, winrate 0.0%, avg score **0.102** vs **0.105**
-- vs AntiMacDuoV2 BA: **2W / 0L / 0D**, winrate 100.0%, avg score **0.104** vs **0.100**
+- vs MacDuo BA: **0W / 2L / 0D**, winrate 0.0%, avg score **0.104** vs **0.654**
+- vs AntiMacDuoV2 AB: **0W / 2L / 0D**, winrate 0.0%, avg score **0.101** vs **0.105**
+- vs AntiMacDuoV2 BA: **0W / 0L / 2D**, winrate 0.0%, avg score **0.100** vs **0.100**
 
 ### Aggregated by opponent
-- vs MacDuo (4 matches): **0W / 4L / 0D**, winrate 0.0%, avg score **0.061** vs **0.726**
-- vs AntiMacDuoV2 (4 matches): **2W / 2L / 0D**, winrate 50.0%, avg score **0.103** vs **0.103**
+- vs MacDuo (4 matches): **0W / 4L / 0D**, winrate 0.0%, avg score **0.063** vs **0.727**
+- vs AntiMacDuoV2 (4 matches): **0W / 2L / 2D**, winrate 0.0%, avg score **0.101** vs **0.103**
 
 ### Overall aggregate
-- Total: **2W / 6L / 0D** (8 matches)
-- Win rate: **25.0%**
-- Avg score: candidate **0.082** vs baseline **0.414**
+- Total: **0W / 6L / 2D** (8 matches)
+- Win rate: **0.0%**
+- Avg score: candidate **0.082** vs baseline **0.415**
 
-## Comparison vs previous run (`benchmark/mini_tournament_20260313_063702`)
-- W/L profile unchanged overall and by opponent.
-- Only tiny score variations (effectively neutral): overall candidate avg **0.083 -> 0.082**.
+## Comparison vs previous run (`benchmark/mini_tournament_20260313_064537`)
+- Vs MacDuo: essentially unchanged (still **0-4-0**).
+- Vs AntiMacDuoV2: regressed from **2-2-0** to **0-2-2**.
+- Overall: regressed from **2-6-0** to **0-6-2**, with near-identical average score.
 
 ## Verdict
-Rollback to the stable flanking threshold recovers consistency but does not materially improve performance. Candidate remains in the same performance band.
+Increasing M3 main-target pressure bonus is not beneficial and should be rejected.
 
 ## Artifacts
-- `benchmark/mini_tournament_20260313_064537/summary.md`
-- `benchmark/mini_tournament_20260313_064537/results.json`
-- `benchmark/mini_tournament_20260313_064537/macduo_AB/match_20260313_064538.log`
-- `benchmark/mini_tournament_20260313_064537/macduo_BA/match_20260313_064642.log`
-- `benchmark/mini_tournament_20260313_064537/v2_AB/match_20260313_064746.log`
-- `benchmark/mini_tournament_20260313_064537/v2_BA/match_20260313_064849.log`
+- `benchmark/mini_tournament_20260313_065925/summary.md`
+- `benchmark/mini_tournament_20260313_065925/results.json`
+- `benchmark/mini_tournament_20260313_065925/macduo_AB/match_20260313_065927.log`
+- `benchmark/mini_tournament_20260313_065925/macduo_BA/match_20260313_070031.log`
+- `benchmark/mini_tournament_20260313_065925/v2_AB/match_20260313_070135.log`
+- `benchmark/mini_tournament_20260313_065925/v2_BA/match_20260313_070238.log`
