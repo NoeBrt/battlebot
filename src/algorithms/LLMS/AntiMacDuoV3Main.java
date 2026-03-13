@@ -43,7 +43,7 @@ public class AntiMacDuoV3Main extends ClaudeUtils {
             boolean sec = e.type == characteristics.IRadarResult.Types.OpponentSecondaryBot;
             // Adaptive secondary pressure: strong nearby focus, reduced long-range tunnel vision.
             double pri = sec ? (d < 650.0 ? 170.0 : 120.0) : 10.0;
-            if (M3.equals(id) && !sec) pri += 55.0;
+            if (M3.equals(id) && !sec) pri += 45.0;
             if (!Double.isNaN(focusX) && Math.hypot(e.x - focusX, e.y - focusY) < 140.0) pri += 80.0;
             double score = pri - d;
             if (score > bestScore) { bestScore = score; best = e; }
