@@ -11,8 +11,6 @@ public class AntiMacDuoV3Main extends ClaudeUtils {
     // Slightly tighter engagement envelope to avoid over-kiting into low-pressure stalemates.
     private static final double MIN_R = 360.0, MAX_R = 680.0;
     private static final double FIRE_SPREAD = 0.10;
-    private static final int LOW_HP_RETREAT_THRESHOLD = 55;
-    private static final double LOW_HP_RETREAT_RANGE = 560.0;
     private double holdX, holdY;
     private int noFireTicks = 0;
 
@@ -126,13 +124,6 @@ public class AntiMacDuoV3Main extends ClaudeUtils {
 
         double dx = t.x - myX, dy = t.y - myY;
         double d = Math.hypot(dx, dy), base = Math.atan2(dy, dx);
-
-        // Preserve main bots when low HP to keep focus-fire and spotting online longer.
-        if (getHealth() <= LOW_HP_RETREAT_THRESHOLD && d < LOW_HP_RETREAT_RANGE) {
-            double away = normA(base + Math.PI);
-            if (!isFacing(away)) stepTurnTo(away); else doMove(true);
-            return;
-        }
 
         if (d > MAX_R) { if (!isFacing(base)) stepTurnTo(base); else doMove(true); return; }
         if (d < MIN_R) { double away = normA(base + Math.PI); if (!isFacing(away)) stepTurnTo(away); else doMove(true); return; }
