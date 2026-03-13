@@ -1,0 +1,18 @@
+Compiling sources...
+Running Headless Match (caffeinate: system will stay awake)...
+Logging details to: /Users/noe/Desktop/sorbonneWS/Daar/Simovie/coder/battlebot/benchmark/mini_tournament_20260313_040331/v2_BA/match_20260313_040804.log
+=== Headless Match Run ===
+matches=3 timeout=30000ms delay=1ms
+TeamA strategies: main=algorithms.LLMS.AntiMacDuoV2Main secondary=algorithms.LLMS.AntiMacDuoV2Secondary
+TeamB strategies: main=algorithms.LLMS.AntiMacDuoV3Main secondary=algorithms.LLMS.AntiMacDuoV3Secondary
+Team A (Bilgewater): Main=algorithms.LLMS.AntiMacDuoV2Main  Secondary=algorithms.LLMS.AntiMacDuoV2Secondary
+Team B (Fantom Danger): Main=algorithms.LLMS.AntiMacDuoV3Main  Secondary=algorithms.LLMS.AntiMacDuoV3Secondary
+>>> Match 1/3... A_WIN  A=0.115 B=0.109  (30.0s)
+>>> Match 2/3... A_WIN  A=0.115 B=0.109  (30.0s)
+>>> Match 3/3... A_WIN  A=0.115 B=0.109  (30.0s)
+=== SUMMARY ===
+matches=3
+avgScoreA=0.115 avgScoreB=0.109
+winRateA=1.000 winRateB=0.000 drawRate=0.000
+mean(scoreA-scoreB)=0.006 std=0.000
+Log saved: /Users/noe/Desktop/sorbonneWS/Daar/Simovie/coder/battlebot/benchmark/mini_tournament_20260313_040331/v2_BA/match_20260313_040804.log
