@@ -1,0 +1,82 @@
+{
+  "legs": [
+    {
+      "opponent": "MacDuo",
+      "leg": "AB",
+      "folder": "macduo_AB",
+      "log": "benchmark/mini_tournament_20260313_040331/macduo_AB/match_20260313_040335.log",
+      "matches": 3,
+      "wins": 0,
+      "losses": 3,
+      "draws": 0,
+      "win_rate": 0.0,
+      "avg_candidate": 0.018,
+      "avg_baseline": 1.0
+    },
+    {
+      "opponent": "MacDuo",
+      "leg": "BA",
+      "folder": "macduo_BA",
+      "log": "benchmark/mini_tournament_20260313_040331/macduo_BA/match_20260313_040455.log",
+      "matches": 3,
+      "wins": 0,
+      "losses": 3,
+      "draws": 0,
+      "win_rate": 0.0,
+      "avg_candidate": 0.029,
+      "avg_baseline": 0.862
+    },
+    {
+      "opponent": "AntiMacDuoV2",
+      "leg": "AB",
+      "folder": "v2_AB",
+      "log": "benchmark/mini_tournament_20260313_040331/v2_AB/match_20260313_040629.log",
+      "matches": 3,
+      "wins": 0,
+      "losses": 2,
+      "draws": 1,
+      "win_rate": 0.0,
+      "avg_candidate": 0.11,
+      "avg_baseline": 0.11333333333333334
+    },
+    {
+      "opponent": "AntiMacDuoV2",
+      "leg": "BA",
+      "folder": "v2_BA",
+      "log": "benchmark/mini_tournament_20260313_040331/v2_BA/match_20260313_040804.log",
+      "matches": 3,
+      "wins": 0,
+      "losses": 3,
+      "draws": 0,
+      "win_rate": 0.0,
+      "avg_candidate": 0.109,
+      "avg_baseline": 0.115
+    }
+  ],
+  "aggregated": [
+    {
+      "opponent": "MacDuo",
+      "matches": 6,
+      "wins": 0,
+      "losses": 6,
+      "draws": 0,
+      "sum_c": 0.14100000000000001,
+      "sum_b": 5.586,
+      "win_rate": 0.0,
+      "avg_candidate": 0.023500000000000004,
+      "avg_baseline": 0.931
+    },
+    {
+      "opponent": "AntiMacDuoV2",
+      "matches": 6,
+      "wins": 0,
+      "losses": 5,
+      "draws": 1,
+      "sum_c": 0.657,
+      "sum_b": 0.685,
+      "win_rate": 0.0,
+      "avg_candidate": 0.1095,
+      "avg_baseline": 0.11416666666666668
+    }
+  ]
+}
