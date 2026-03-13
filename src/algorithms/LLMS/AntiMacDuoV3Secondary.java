@@ -8,7 +8,7 @@ public class AntiMacDuoV3Secondary extends ClaudeUtils {
     // Slightly more conservative staging to reduce early wipeouts vs aggressive baselines.
     private static final double STAGE_X_A = 1650.0, STAGE_X_B = 1350.0;
     private static final double[] STAGE_Y = {230.0, 1770.0};
-    private static final double FIRE_SPREAD = 0.10;
+    private static final double FIRE_SPREAD = 0.12;
     private static final int LOW_HP_RETREAT_THRESHOLD = 45;
     private static final double LOW_HP_RETREAT_RANGE = 520.0;
     private double sx, sy;
