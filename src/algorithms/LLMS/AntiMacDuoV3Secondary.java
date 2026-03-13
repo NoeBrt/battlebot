@@ -49,7 +49,7 @@ public class AntiMacDuoV3Secondary extends ClaudeUtils {
             // Balanced focus coordination with a distance guardrail (avoid over-chasing far calls).
             if (!Double.isNaN(focusX)
                     && Math.hypot(e.x - focusX, e.y - focusY) < 150.0
-                    && Math.hypot(e.x - myX, e.y - myY) < 780.0) pri += 85.0;
+                    && Math.hypot(e.x - myX, e.y - myY) < 700.0) pri += 85.0;
             double sc = pri - d;
             if (sc > bestScore) {
                 bestScore = sc;
