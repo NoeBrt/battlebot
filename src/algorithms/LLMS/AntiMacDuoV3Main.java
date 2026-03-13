@@ -55,7 +55,7 @@ public class AntiMacDuoV3Main extends ClaudeUtils {
     protected boolean tryFire(TrackedEnemy tgt) {
         if (tgt == null || fireCooldown > 0) return false;
         double base = computeLeadAngle(tgt);
-        double[] angles = {base, base - FIRE_SPREAD, base + FIRE_SPREAD};
+        double[] angles = {base, base - FIRE_SPREAD, base + FIRE_SPREAD, base - 2 * FIRE_SPREAD, base + 2 * FIRE_SPREAD};
         for (double a : angles) {
             if (isSafeFire(a)) {
                 fire(a);
