@@ -9,7 +9,7 @@ public class AntiMacDuoV3Main extends ClaudeUtils {
     private static final double[] HOLD_Y = {760.0, 1000.0, 1240.0};
     // Slightly wider kiting bubble to reduce close-range trades vs MacDuo.
     // Slightly tighter engagement envelope to avoid over-kiting into low-pressure stalemates.
-    private static final double MIN_R = 360.0, MAX_R = 760.0;
+    private static final double MIN_R = 360.0, MAX_R = 720.0;
     private static final double FIRE_SPREAD = 0.10;
     private double holdX, holdY;
     private int noFireTicks = 0;
