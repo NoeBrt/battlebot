@@ -100,7 +100,7 @@ public class AntiMacDuoV3Secondary extends ClaudeUtils {
             }
         } else noFireTicks = 0;
 
-        if (!isAvoiding() && state != S.DEAD) state = enemies.isEmpty() ? S.ADVANCING : (noFireTicks > 20 ? S.FLANKING : S.FIRING);
+        if (!isAvoiding() && state != S.DEAD) state = enemies.isEmpty() ? S.ADVANCING : (noFireTicks > 16 ? S.FLANKING : S.FIRING);
 
         switch (state) {
             case ADVANCING:
