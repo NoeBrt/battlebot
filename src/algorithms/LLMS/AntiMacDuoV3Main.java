@@ -86,7 +86,7 @@ public class AntiMacDuoV3Main extends ClaudeUtils {
         } else noFireTicks = 0;
 
         if (!isAvoiding() && state != S.DEAD) {
-            if (!enemies.isEmpty()) state = (noFireTicks > 25 ? S.FLANKING : S.FIRING);
+            if (!enemies.isEmpty()) state = (noFireTicks > 22 ? S.FLANKING : S.FIRING);
             else state = Math.hypot(myX - holdX, myY - holdY) < 70 ? S.HOLDING : S.ADVANCING;
         }
 
