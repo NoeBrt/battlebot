@@ -9,8 +9,8 @@ public class AntiMacDuoV3Secondary extends ClaudeUtils {
     private static final double STAGE_X_A = 1650.0, STAGE_X_B = 1350.0;
     private static final double[] STAGE_Y = {230.0, 1770.0};
     private static final double FIRE_SPREAD = 0.12;
-    private static final int LOW_HP_RETREAT_THRESHOLD = 40;
-    private static final double LOW_HP_RETREAT_RANGE = 500.0;
+    private static final int LOW_HP_RETREAT_THRESHOLD = 45;
+    private static final double LOW_HP_RETREAT_RANGE = 520.0;
     private double sx, sy;
     private int noFireTicks = 0;
 
