@@ -1,15 +1,15 @@
 # Latest benchmark report
 
-Date: 2026-03-13 05:36 (Europe/Paris)
+Date: 2026-03-13 05:44 (Europe/Paris)
 Branch: `agent/v2`
-Commit tested: `44a885e`
+Commit tested: `7c5c11f`
 
 ## Iteration
-- Change: `AntiMacDuoV3Secondary` now triggers FLANKING reposition sooner when no shots are fired.
+- Change: rollback of the early flank trigger regression in `AntiMacDuoV3Secondary`.
 - File modified:
   - `src/algorithms/LLMS/AntiMacDuoV3Secondary.java`
 - Parameter:
-  - `noFireTicks` flank trigger: `>20 -> >16`
+  - `noFireTicks` flank trigger: `>16 -> >20`
 
 ## Tournament protocol
 - Runner: sub-agent `bench`
@@ -26,31 +26,31 @@ Commit tested: `44a885e`
 ## Results (candidate perspective)
 
 ### Per leg
-- vs MacDuo AB: **0W / 2L / 0D**, winrate 0.0%, avg score **0.000** vs **1.000**
-- vs MacDuo BA: **0W / 2L / 0D**, winrate 0.0%, avg score **0.039** vs **0.860**
-- vs AntiMacDuoV2 AB: **0W / 2L / 0D**, winrate 0.0%, avg score **0.100** vs **0.110**
-- vs AntiMacDuoV2 BA: **0W / 0L / 2D**, winrate 0.0%, avg score **0.100** vs **0.100**
+- vs MacDuo AB: **0W / 2L / 0D**, winrate 0.0%, avg score **0.022** vs **0.800**
+- vs MacDuo BA: **0W / 2L / 0D**, winrate 0.0%, avg score **0.098** vs **0.650**
+- vs AntiMacDuoV2 AB: **0W / 2L / 0D**, winrate 0.0%, avg score **0.102** vs **0.105**
+- vs AntiMacDuoV2 BA: **2W / 0L / 0D**, winrate 100.0%, avg score **0.102** vs **0.100**
 
 ### Aggregated by opponent
-- vs MacDuo (4 matches): **0W / 4L / 0D**, winrate 0.0%, avg score **0.019** vs **0.930**
-- vs AntiMacDuoV2 (4 matches): **0W / 2L / 2D**, winrate 0.0%, avg score **0.100** vs **0.105**
+- vs MacDuo (4 matches): **0W / 4L / 0D**, winrate 0.0%, avg score **0.060** vs **0.725**
+- vs AntiMacDuoV2 (4 matches): **2W / 2L / 0D**, winrate 50.0%, avg score **0.102** vs **0.103**
 
 ### Overall aggregate
-- Total: **0W / 6L / 2D** (8 matches)
-- Win rate: **0.0%**
-- Avg score: candidate **0.060** vs baseline **0.517**
+- Total: **2W / 6L / 0D** (8 matches)
+- Win rate: **25.0%**
+- Avg score: candidate **0.081** vs baseline **0.414**
 
-## Comparison vs previous run (`benchmark/mini_tournament_20260313_052411`)
-- Vs MacDuo: significantly worse (candidate avg **0.058 -> 0.019**).
-- Vs AntiMacDuoV2: slightly worse (candidate avg **0.103 -> 0.100**).
-- Overall: regressed from **2-6-0** to **0-6-2**.
+## Comparison vs previous run (`benchmark/mini_tournament_20260313_053144`)
+- Vs MacDuo: strong recovery (candidate avg **0.019 -> 0.060**).
+- Vs AntiMacDuoV2: improved (candidate avg **0.100 -> 0.102**, and 2 wins restored in BA leg).
+- Overall: recovered from **0-6-2** to **2-6-0**.
 
 ## Verdict
-This tweak is a regression and should be rolled back or replaced in the next iteration.
+Rollback successfully removed the regression and restores the previous performance band. Candidate remains promising vs V2 but still non-competitive vs MacDuo.
 
 ## Artifacts
-- `benchmark/mini_tournament_20260313_053144/summary.md`
-- `benchmark/mini_tournament_20260313_053144/macduo_AB/match_20260313_053146.log`
-- `benchmark/mini_tournament_20260313_053144/macduo_BA/match_20260313_053220.log`
-- `benchmark/mini_tournament_20260313_053144/v2_AB/match_20260313_053324.log`
-- `benchmark/mini_tournament_20260313_053144/v2_BA/match_20260313_053427.log`
+- `benchmark/mini_tournament_20260313_053935/summary.md`
+- `benchmark/mini_tournament_20260313_053935/macduo_AB/match_20260313_053937.log`
+- `benchmark/mini_tournament_20260313_053935/macduo_BA/match_20260313_054040.log`
+- `benchmark/mini_tournament_20260313_053935/v2_AB/match_20260313_054144.log`
+- `benchmark/mini_tournament_20260313_053935/v2_BA/match_20260313_054247.log`
