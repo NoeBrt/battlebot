@@ -1,15 +1,15 @@
 # Latest benchmark report
 
-Date: 2026-03-13 07:31 (Europe/Paris)
+Date: 2026-03-13 07:41 (Europe/Paris)
 Branch: `agent/v2`
-Commit tested: `1c2f8bf`
+Commit tested: `4e8cf3e`
 
 ## Iteration
-- Change: rollback of tighter focus guardrail in `AntiMacDuoV3Secondary`.
+- Change: narrowed `AntiMacDuoV3Main` fire fan.
 - File modified:
-  - `src/algorithms/LLMS/AntiMacDuoV3Secondary.java`
-- Parameter:
-  - focus guardrail distance: `< 700 -> < 780`
+  - `src/algorithms/LLMS/AntiMacDuoV3Main.java`
+- Parameter logic:
+  - fire angles changed from 5 probes (`base`, `±spread`, `±2*spread`) to 3 probes (`base`, `±spread`).
 
 ## Tournament protocol
 - Runner: sub-agent `bench`
@@ -27,30 +27,31 @@ Commit tested: `1c2f8bf`
 
 ### Per leg
 - vs MacDuo AB: **0W / 2L / 0D**, winrate 0.0%, avg score **0.022** vs **0.800**
-- vs MacDuo BA: **0W / 2L / 0D**, winrate 0.0%, avg score **0.104** vs **0.659**
-- vs AntiMacDuoV2 AB: **0W / 2L / 0D**, winrate 0.0%, avg score **0.102** vs **0.105**
-- vs AntiMacDuoV2 BA: **2W / 0L / 0D**, winrate 100.0%, avg score **0.102** vs **0.100**
+- vs MacDuo BA: **0W / 2L / 0D**, winrate 0.0%, avg score **0.032** vs **0.853**
+- vs AntiMacDuoV2 AB: **0W / 2L / 0D**, winrate 0.0%, avg score **0.100** vs **0.110**
+- vs AntiMacDuoV2 BA: **0W / 2L / 0D**, winrate 0.0%, avg score **0.103** vs **0.118**
 
 ### Aggregated by opponent
-- vs MacDuo (4 matches): **0W / 4L / 0D**, winrate 0.0%, avg score **0.063** vs **0.730**
-- vs AntiMacDuoV2 (4 matches): **2W / 2L / 0D**, winrate 50.0%, avg score **0.102** vs **0.103**
+- vs MacDuo (4 matches): **0W / 4L / 0D**, winrate 0.0%, avg score **0.027** vs **0.827**
+- vs AntiMacDuoV2 (4 matches): **0W / 4L / 0D**, winrate 0.0%, avg score **0.102** vs **0.114**
 
 ### Overall aggregate
-- Total: **2W / 6L / 0D** (8 matches)
-- Win rate: **25.0%**
-- Avg score: candidate **0.082** vs baseline **0.416**
+- Total: **0W / 8L / 0D** (8 matches)
+- Win rate: **0.0%**
+- Avg score: candidate **0.064** vs baseline **0.470**
 
-## Comparison vs previous run (`benchmark/mini_tournament_20260313_071815`)
-- W/L profile unchanged for both opponents and overall.
-- Tiny score deltas only; effectively neutral change.
+## Comparison vs previous run (`benchmark/mini_tournament_20260313_072719`)
+- Overall W-L-D regressed from **2-6-0** to **0-8-0**.
+- Candidate average score dropped (**0.082 -> 0.064**).
+- Lost prior wins vs V2 (from **2-2-0** to **0-4-0**).
 
 ## Verdict
-Rollback to `<780` restores the prior performance band and is preferable to the tighter `<700` variant, but does not create a new gain.
+Narrowing the fire fan is a clear regression and should be rejected.
 
 ## Artifacts
-- `benchmark/mini_tournament_20260313_072719/summary.md`
-- `benchmark/mini_tournament_20260313_072719/results.json`
-- `benchmark/mini_tournament_20260313_072719/macduo_AB/match_20260313_072723.log`
-- `benchmark/mini_tournament_20260313_072719/macduo_BA/match_20260313_072828.log`
-- `benchmark/mini_tournament_20260313_072719/v2_AB/match_20260313_072931.log`
-- `benchmark/mini_tournament_20260313_072719/v2_BA/match_20260313_073035.log`
+- `benchmark/mini_tournament_20260313_073603/summary.md`
+- `benchmark/mini_tournament_20260313_073603/results.json`
+- `benchmark/mini_tournament_20260313_073603/macduo_AB/match_20260313_073605.log`
+- `benchmark/mini_tournament_20260313_073603/macduo_BA/match_20260313_073709.log`
+- `benchmark/mini_tournament_20260313_073603/v2_AB/match_20260313_073812.log`
+- `benchmark/mini_tournament_20260313_073603/v2_BA/match_20260313_073915.log`
