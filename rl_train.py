@@ -2,6 +2,8 @@
 """
 rl_train.py — Dual-population CMA-ES co-evolution trainer for Simovie Battlebot.
 UPDATED: Uses [0,1] normalization for stable parameter evolution.
+FIX: parse_match_output() aligned with HeadlessMatchRunner SUMMARY output.
+FIX: compute_fitness() replaces the broken dmg/kill parsing that was always 0.
 """
 import argparse
 import json
@@ -64,6 +66,25 @@ PARAM_LO      = np.array([p[2] for p in PARAM_SPEC], dtype=float)
 PARAM_HI      = np.array([p[3] for p in PARAM_SPEC], dtype=float)
 PARAM_IS_INT  = [p[4] for p in PARAM_SPEC]
 
+# Non-evolved constants (game rules, map dimensions, static thresholds)
+FIXED_CONSTANTS = {
+    "MAP_WIDTH": 3000.0,
+    "MAP_HEIGHT": 2000.0,
+    "MAP_CX": 1500.0,
+    "MAP_CY": 1000.0,
+    "FORMATION_Y_BASE": 1000.0,
+    "FORMATION_Y_OFFSET": 260.0,
+    "WALL_MARGIN": 200.0,
+    "SAFE_ZONE_X": 200.0,
+    "FLANK_OFFSET": 150.0,
+    "HEALTH_HIGH_THRESHOLD": 200.0,
+    "HEALTH_LOW_THRESHOLD": 100.0,
+    "PATROL_THRESHOLD": 200.0,
+    "FIRING_ANGLE_TOLERANCE": 0.2,
+    "MAX_HEALTH_MAIN": 300.0,
+    "MAX_HEALTH_SEC": 100.0
+}
+
 RL_DIR = Path(__file__).resolve().parent
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -76,7 +97,6 @@ def normalize(real_params):
 
 def denormalize(norm_params):
     """Convert [0, 1] space parameters to real values."""
-    # Clamp inputs to [0,1] just in case
     n = np.clip(norm_params, 0.0, 1.0)
     return PARAM_LO + n * (PARAM_HI - PARAM_LO)
 
@@ -91,13 +111,23 @@ def generate_rlconfig_java(params: np.ndarray, filepath: Path, class_name: str =
         "",
         f"public class {class_name} {{",
     ]
+    # 1. Evolved Parameters
     for i, (name, default, lo, hi, is_int) in enumerate(PARAM_SPEC):
         val = params[i]
-        val = max(lo, min(hi, val))  # double safety clamp
+        val = max(lo, min(hi, val))
         if is_int:
-            lines.append(f"    public static int    {name} = {int(round(val))};")
+            lines.append(f"    public static final int    {name} = {int(round(val))};")
         else:
-            lines.append(f"    public static double {name} = {val:.6f};")
+            lines.append(f"    public static final double {name} = {val:.6f};")
+            
+    # 2. Fixed Constants
+    lines.append("")
+    for name, val in FIXED_CONSTANTS.items():
+        if isinstance(val, int):
+             lines.append(f"    public static final int    {name} = {val};")
+        else:
+             lines.append(f"    public static final double {name} = {val:.6f};")
+
     lines.append("}")
     lines.append("")
     filepath.write_text("\n".join(lines))
@@ -196,11 +226,16 @@ def run_match(work_dir: Path, n_matches: int = 3, timeout_ms: int = 30000,
     log_dir = work_dir / "rl_logs"
     log_dir.mkdir(exist_ok=True)
 
-    cmd = [
+    java_cmd = [
         "java", "-cp", f"{jars}/*:{beans}",
         "supportGUI.HeadlessMatchRunner",
         str(n_matches), str(timeout_ms), str(delay_ms), str(log_dir)
     ]
+
+    if shutil.which("xvfb-run") and not os.environ.get("DISPLAY"):
+        cmd = ["xvfb-run", "-a"] + java_cmd
+    else:
+        cmd = java_cmd
 
     try:
         result = subprocess.run(
@@ -214,41 +249,103 @@ def run_match(work_dir: Path, n_matches: int = 3, timeout_ms: int = 30000,
     return parse_match_output(output)
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# FIX #1 — parse_match_output() aligné sur le nouveau SUMMARY
+# ──────────────────────────────────────────────────────────────────────────────
+
 def parse_match_output(output: str) -> dict:
-    """Parse SUMMARY block from HeadlessMatchRunner output."""
+    """
+    Parse SUMMARY block from HeadlessMatchRunner output.
+    Aligns with the extended SUMMARY that now includes avgDeadMain/Sec and avgHp.
+    """
     result = {
         "scoreA": 0.0, "scoreB": 0.0, "winRateA": 0.5,
-        "avgFireCountA": 0.0,
         "avgDeadMainA": 0.0, "avgDeadSecA": 0.0,
         "avgDeadMainB": 0.0, "avgDeadSecB": 0.0,
-        "avgDmgMainByA": 0.0, "avgDmgSecByA": 0.0,
-        "avgDmgMainByB": 0.0, "avgDmgSecByB": 0.0,
+        "avgHpA": 0.0, "avgHpB": 0.0,
         "error": None,
     }
-    m = re.search(r"avgScoreA=([\d.]+)\s+avgScoreB=([\d.]+)", output)
-    if m: result["scoreA"], result["scoreB"] = float(m.group(1)), float(m.group(2))
-    
-    m = re.search(r"winRateA=([\d.]+)", output)
-    if m: result["winRateA"] = float(m.group(1))
 
-    m = re.search(r"avgFireCountA=([\d.]+)", output)
-    if m: result["avgFireCountA"] = float(m.group(1))
+    m = re.search(r"avgScoreA=([\d.]+)\s+avgScoreB=([\d.]+)", output)
+    if m:
+        result["scoreA"], result["scoreB"] = float(m.group(1)), float(m.group(2))
+
+    m = re.search(r"winRateA=([\d.]+)", output)
+    if m:
+        result["winRateA"] = float(m.group(1))
 
     m = re.search(r"avgDeadMainA=([\d.]+)\s+avgDeadSecA=([\d.]+)", output)
-    if m: result["avgDeadMainA"], result["avgDeadSecA"] = float(m.group(1)), float(m.group(2))
+    if m:
+        result["avgDeadMainA"], result["avgDeadSecA"] = float(m.group(1)), float(m.group(2))
 
     m = re.search(r"avgDeadMainB=([\d.]+)\s+avgDeadSecB=([\d.]+)", output)
-    if m: result["avgDeadMainB"], result["avgDeadSecB"] = float(m.group(1)), float(m.group(2))
+    if m:
+        result["avgDeadMainB"], result["avgDeadSecB"] = float(m.group(1)), float(m.group(2))
 
-    m = re.search(r"avgDmgMainByA=([\d.]+)\s+avgDmgSecByA=([\d.]+)", output)
-    if m: result["avgDmgMainByA"], result["avgDmgSecByA"] = float(m.group(1)), float(m.group(2))
+    m = re.search(r"avgHpA=([\d.]+)\s+avgHpB=([\d.]+)", output)
+    if m:
+        result["avgHpA"], result["avgHpB"] = float(m.group(1)), float(m.group(2))
 
-    m = re.search(r"avgDmgMainByB=([\d.]+)\s+avgDmgSecByB=([\d.]+)", output)
-    if m: result["avgDmgMainByB"], result["avgDmgSecByB"] = float(m.group(1)), float(m.group(2))
+    m = re.search(r"TeamA strategies: main=([\w.]+) secondary=([\w.]+)", output)
+    if m:
+        result["strategyMainA"], result["strategySecA"] = m.group(1), m.group(2)
+
+    m = re.search(r"TeamB strategies: main=([\w.]+) secondary=([\w.]+)", output)
+    if m:
+        result["strategyMainB"], result["strategySecB"] = m.group(1), m.group(2)
 
     if not re.search(r"SUMMARY", output):
         result["error"] = "no_summary"
+
     return result
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# FIX #2 — compute_fitness() coopération + agressivité
+# ──────────────────────────────────────────────────────────────────────────────
+
+def compute_fitness(result: dict, team: str) -> float:
+    """
+    Fitness orientée coopération + agressivité.
+
+    Composantes :
+      scoreX        — signal composite du runner (kills 60% + dmg 30% + survie 10%)
+                      C'est déjà une bonne base, on l'amplifie selon la coopération.
+      ally_survival — [0,1] : pénalise la mort des alliés. Mourir seul = mauvaise
+                      coordination. Force les bots à se couvrir mutuellement.
+      kill_pressure — bonus proportionnel aux kills ennemis accumulés.
+      hp_dominance  — bonus si l'équipe termine avec plus de HP que l'adversaire.
+
+    Formula :
+      fitness = scoreX * (0.6 + 0.4 * ally_survival) + 0.15 * kill_pressure + 0.10 * hp_dominance
+
+    - Quand ally_survival=1 (tous vivants) : scoreX est multiplié par 1.0 (plein potentiel)
+    - Quand ally_survival=0 (tous morts)   : scoreX est multiplié par 0.6 (fortement pénalisé)
+    """
+    if team == "A":
+        score      = result["scoreA"]
+        dead_ally  = result["avgDeadMainA"] + result["avgDeadSecA"]
+        dead_enemy = result["avgDeadMainB"] + result["avgDeadSecB"]
+        hp_self    = result["avgHpA"]
+        hp_enemy   = result["avgHpB"]
+    else:
+        score      = result["scoreB"]
+        dead_ally  = result["avgDeadMainB"] + result["avgDeadSecB"]
+        dead_enemy = result["avgDeadMainA"] + result["avgDeadSecA"]
+        hp_self    = result["avgHpB"]
+        hp_enemy   = result["avgHpA"]
+
+    # [0,1] — 5 bots max (3 mains + 2 secondaires)
+    ally_survival = max(0.0, 1.0 - dead_ally / 5.0)
+    kill_pressure = dead_enemy / 5.0
+    hp_dominance  = max(0.0, hp_self - hp_enemy)
+
+    fitness = (
+        score * (0.6 + 0.4 * ally_survival)
+        + 0.15 * kill_pressure
+        + 0.10 * hp_dominance
+    )
+    return fitness
 
 
 def setup_worker(worker_id: int) -> Path:
@@ -257,7 +354,9 @@ def setup_worker(worker_id: int) -> Path:
     for name in ["jars", "avatars", "META-INF"]:
         link = worker_dir / name
         target = RL_DIR / name
-        if not link.exists() and target.exists():
+        if target.exists():
+            if link.is_symlink() or link.exists():
+                link.unlink()
             link.symlink_to(target)
     src_dst = worker_dir / "src"
     if src_dst.exists():
@@ -269,35 +368,44 @@ def setup_worker(worker_id: int) -> Path:
 def evaluate_matchup(args):
     """Evaluate one A vs B matchup. Params passed here are NORMALIZED [0,1]."""
     worker_id, norm_a, norm_b, n_matches, timeout_ms = args
+    print(f"  [Worker {worker_id}] Setting up matchup...")
     worker_dir = setup_worker(worker_id)
-    
-    # Denormalize to real values for Java config
+
     real_a = denormalize(norm_a)
     real_b = denormalize(norm_b)
 
     build_team_sources(worker_dir, team_pkg="rla", suffix="A", config_class="RLConfigA")
     build_team_sources(worker_dir, team_pkg="rlb", suffix="B", config_class="RLConfigB")
-    
+
     generate_rlconfig_java(real_a, worker_dir / "src" / "algorithms" / "rla" / "RLConfigA.java", "RLConfigA", "algorithms.rla")
     generate_rlconfig_java(real_b, worker_dir / "src" / "algorithms" / "rlb" / "RLConfigB.java", "RLConfigB", "algorithms.rlb")
-    
+
     patch_parameters_for_duel(worker_dir)
 
+    print(f"  [Worker {worker_id}] Compiling...")
     if not compile_java(worker_dir):
+        print(f"  [Worker {worker_id}] Compilation FAILED.")
         return worker_id, -1.0, -1.0
 
+    print(f"  [Worker {worker_id}] Running {n_matches} matches...")
     result = run_match(worker_dir, n_matches=n_matches, timeout_ms=timeout_ms)
+
+    if "strategyMainA" in result and "strategyMainB" in result:
+        print(f"  [Worker {worker_id}] A: {result['strategyMainA']} vs B: {result['strategyMainB']}")
+
     if result["error"]:
+        print(f"  [Worker {worker_id}] Match ERROR: {result['error']}")
         return worker_id, -0.5, -0.5
 
-    # Fitness: Damage + Kills
-    dmg_a = 0.75 * result["avgDmgMainByA"] + 0.25 * result["avgDmgSecByA"]
-    dmg_b = 0.75 * result["avgDmgMainByB"] + 0.25 * result["avgDmgSecByB"]
+    # FIX #2 — utilise compute_fitness() au lieu du calcul dmg/kill inexistant
+    fit_a = compute_fitness(result, "A")
+    fit_b = compute_fitness(result, "B")
 
-    kill_bonus_a = 0.35 * (result["avgDeadMainB"] / 3.0) + 0.15 * (result["avgDeadSecB"] / 2.0)
-    kill_bonus_b = 0.35 * (result["avgDeadMainA"] / 3.0) + 0.15 * (result["avgDeadSecA"] / 2.0)
+    print(f"  [Worker {worker_id}] scoreA={result['scoreA']:.3f} scoreB={result['scoreB']:.3f}")
+    print(f"  [Worker {worker_id}] deadA={result['avgDeadMainA']:.1f}+{result['avgDeadSecA']:.1f}  deadB={result['avgDeadMainB']:.1f}+{result['avgDeadSecB']:.1f}")
+    print(f"  [Worker {worker_id}] Fitness A={fit_a:.4f}  B={fit_b:.4f}")
 
-    return worker_id, dmg_a + kill_bonus_a, dmg_b + kill_bonus_b
+    return worker_id, fit_a, fit_b
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -308,12 +416,12 @@ class CMAES:
     def __init__(self, x0: np.ndarray, sigma0: float = 0.2, pop_size: int = None):
         """x0 and sigma0 are in normalized space [0,1]."""
         self.n = len(x0)
-        self.mean = x0.copy()  # Kept in [0,1]
+        self.mean = x0.copy()
         self.sigma = sigma0
 
         self.lam = pop_size or (4 + int(3 * math.log(self.n)))
         self.mu = self.lam // 2
-        
+
         weights = np.log(self.mu + 0.5) - np.log(np.arange(1, self.mu + 1))
         self.weights = weights / weights.sum()
         self.mueff = 1.0 / (self.weights ** 2).sum()
@@ -336,7 +444,7 @@ class CMAES:
         for _ in range(self.lam):
             z = np.random.randn(self.n)
             x = self.mean + self.sigma * (self.invsqrtC @ z)
-            x = np.clip(x, 0.0, 1.0) # Always clamp to normalized bounds
+            x = np.clip(x, 0.0, 1.0)
             solutions.append(x)
         return solutions
 
@@ -347,20 +455,22 @@ class CMAES:
         self.mean = np.zeros(self.n)
         for i in range(self.mu):
             self.mean += self.weights[i] * solutions[idx[i]]
-        
+
         y = (self.mean - old_mean) / self.sigma
         z = self.invsqrtC @ y
         self.ps = (1 - self.cs) * self.ps + math.sqrt(self.cs * (2 - self.cs) * self.mueff) * z
         hsig = (np.linalg.norm(self.ps) / math.sqrt(1 - (1 - self.cs) ** (2 * self.gen)) / self.chiN < 1.4 + 2 / (self.n + 1))
         self.pc = ((1 - self.cc) * self.pc + hsig * math.sqrt(self.cc * (2 - self.cc) * self.mueff) * y)
-        
+
         artmp = np.zeros((self.n, self.mu))
         for i in range(self.mu):
             artmp[:, i] = (solutions[idx[i]] - old_mean) / self.sigma
-        
-        self.C = ((1 - self.c1 - self.cmu) * self.C + self.c1 * (np.outer(self.pc, self.pc) + (1 - hsig) * self.cc * (2 - self.cc) * self.C) + self.cmu * artmp @ np.diag(self.weights) @ artmp.T)
+
+        self.C = ((1 - self.c1 - self.cmu) * self.C
+                  + self.c1 * (np.outer(self.pc, self.pc) + (1 - hsig) * self.cc * (2 - self.cc) * self.C)
+                  + self.cmu * artmp @ np.diag(self.weights) @ artmp.T)
         self.sigma *= math.exp((self.cs / self.ds) * (np.linalg.norm(self.ps) / self.chiN - 1))
-        
+
         if self.gen - self.eigeneval > self.lam / (self.c1 + self.cmu) / self.n / 10:
             self.eigeneval = self.gen
             self.C = np.triu(self.C) + np.triu(self.C, 1).T
@@ -370,58 +480,96 @@ class CMAES:
 
     @property
     def best_params(self):
-        # Return REAL values for external usage/saving
         return denormalize(self.mean)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# HALL OF FAME — stabilise la co-évolution
+# ──────────────────────────────────────────────────────────────────────────────
+
+class HallOfFame:
+    """
+    Garde les N meilleurs individus historiques comme adversaires permanents.
+    Évite que CMA-ES apprenne seulement à battre la population actuelle et
+    régresse si l'adversaire se dégrade.
+    """
+    def __init__(self, max_size: int = 6):
+        self.members: list[tuple[float, np.ndarray]] = []
+        self.max_size = max_size
+
+    def update(self, fitness: float, norm_params: np.ndarray):
+        if fitness <= 0:
+            return
+        self.members.append((fitness, norm_params.copy()))
+        self.members.sort(key=lambda x: x[0], reverse=True)
+        self.members = self.members[:self.max_size]
+
+    def sample(self) -> np.ndarray:
+        """Retourne un adversaire du HoF, pondéré par fitness."""
+        if not self.members:
+            return normalize(PARAM_DEFAULT)
+        fitnesses = np.array([m[0] for m in self.members])
+        fitnesses = np.maximum(fitnesses, 0)
+        total = fitnesses.sum()
+        if total < 1e-9:
+            return self.members[0][1]
+        probs = fitnesses / total
+        idx = np.random.choice(len(self.members), p=probs)
+        return self.members[idx][1]
+
+    def __len__(self):
+        return len(self.members)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # TRAINING LOOP
 # ──────────────────────────────────────────────────────────────────────────────
 
+SIGMA_MIN     = 0.02   # seuil de collapse sigma
+SIGMA_RESTART = 0.15   # sigma après restart
+
 def train(args):
     print("=" * 70)
     print("  CMA-ES Evolutionary Self-Play Trainer for Simovie Battlebot")
-    print("  UPDATE: Normalized Param Space [0,1]")
+    print("  FIX: normalized param space + cooperative fitness + Hall of Fame")
     print("=" * 70)
-    
+
     results_dir = RL_DIR / "rl_results"
     results_dir.mkdir(exist_ok=True)
     run_id = time.strftime("%Y%m%d_%H%M%S")
     run_dir = results_dir / f"run_{run_id}"
     run_dir.mkdir()
 
-    # Initialize in NORMALIZED space
-    # Default sigma=0.2 means 20% of range mutation step
-    initial_sigma = 0.2  
+    initial_sigma = 0.2
     start_params_a = normalize(PARAM_DEFAULT)
     start_params_b = normalize(PARAM_DEFAULT)
 
-    # Note: If resuming, need to load real params and normalize them
-    # (Simplified: ignoring resume logic specific handling for now, assuming fresh start 
-    #  or you can manually fix resume if needed)
-
     cma_a = CMAES(start_params_a, sigma0=initial_sigma, pop_size=args.pop)
     cma_b = CMAES(start_params_b, sigma0=initial_sigma, pop_size=args.pop)
+    hof_a = HallOfFame(max_size=6)
+    hof_b = HallOfFame(max_size=6)
 
     best_fitness_a = -float("inf")
     best_fitness_b = -float("inf")
-    # Store REAL params for best
-    best_params_a = denormalize(start_params_a)
-    best_params_b = denormalize(start_params_b)
+    best_params_a  = denormalize(start_params_a)
+    best_params_b  = denormalize(start_params_b)
     history = []
 
     for gen in range(args.generations):
         t0 = time.time()
         print(f"\n--- Generation {gen + 1}/{args.generations} ---")
 
-        # Ask returns NORMALIZED candidates
         cand_a_norm = cma_a.ask()
         cand_b_norm = cma_b.ask()
 
-        eval_args = [
-            (i % args.workers, cand_a_norm[i], cand_b_norm[i], args.matches, args.timeout)
-            for i in range(len(cand_a_norm))
-        ]
+        # Construire les matchups : 1/3 des matchups A vs HoF-B (si dispo)
+        eval_args = []
+        for i in range(len(cand_a_norm)):
+            if i % 3 == 0 and len(hof_b) > 0:
+                opponent = hof_b.sample()
+            else:
+                opponent = cand_b_norm[i % len(cand_b_norm)]
+            eval_args.append((i % args.workers, cand_a_norm[i], opponent, args.matches, args.timeout))
 
         fitnesses_a = [0.0] * len(cand_a_norm)
         fitnesses_b = [0.0] * len(cand_b_norm)
@@ -439,30 +587,49 @@ def train(args):
                         fitnesses_b[idx] = fit_b
                     except Exception as e:
                         print(f"  [ERROR] Candidate {idx}: {e}")
-                        fitnesses_a[idx] = -1.0; fitnesses_b[idx] = -1.0
+                        fitnesses_a[idx] = -1.0
+                        fitnesses_b[idx] = -1.0
 
         cma_a.tell(cand_a_norm, fitnesses_a)
         cma_b.tell(cand_b_norm, fitnesses_b)
 
-        # Track best (fitness)
         gen_best_idx_a = int(np.argmax(fitnesses_a))
         gen_best_idx_b = int(np.argmax(fitnesses_b))
-        
+
         if fitnesses_a[gen_best_idx_a] > best_fitness_a:
             best_fitness_a = fitnesses_a[gen_best_idx_a]
-            # Convert to REAL for storage
-            best_params_a = denormalize(cand_a_norm[gen_best_idx_a])
+            best_params_a  = denormalize(cand_a_norm[gen_best_idx_a])
 
         if fitnesses_b[gen_best_idx_b] > best_fitness_b:
             best_fitness_b = fitnesses_b[gen_best_idx_b]
-            best_params_b = denormalize(cand_b_norm[gen_best_idx_b])
+            best_params_b  = denormalize(cand_b_norm[gen_best_idx_b])
+
+        # Mise à jour Hall of Fame
+        hof_a.update(fitnesses_a[gen_best_idx_a], cand_a_norm[gen_best_idx_a])
+        hof_b.update(fitnesses_b[gen_best_idx_b], cand_b_norm[gen_best_idx_b])
+
+        # Restart sigma si collapse
+        if cma_a.sigma < SIGMA_MIN:
+            print(f"  [CMA-A] Sigma collapse ({cma_a.sigma:.4f}) → restart autour du meilleur")
+            cma_a = CMAES(normalize(best_params_a), sigma0=SIGMA_RESTART, pop_size=args.pop)
+
+        if cma_b.sigma < SIGMA_MIN:
+            print(f"  [CMA-B] Sigma collapse ({cma_b.sigma:.4f}) → restart autour du meilleur")
+            cma_b = CMAES(normalize(best_params_b), sigma0=SIGMA_RESTART, pop_size=args.pop)
 
         elapsed = time.time() - t0
-        print(f"  Team A best: {fitnesses_a[gen_best_idx_a]:.4f}  Sigma: {cma_a.sigma:.4f}")
-        print(f"  Team B best: {fitnesses_b[gen_best_idx_b]:.4f}  Sigma: {cma_b.sigma:.4f}")
-        print(f"  Global best: A={best_fitness_a:.4f} B={best_fitness_b:.4f}")
+        print(f"  Team A best: {fitnesses_a[gen_best_idx_a]:.4f}  Sigma: {cma_a.sigma:.4f}  HoF: {len(hof_a)}")
+        print(f"  Team B best: {fitnesses_b[gen_best_idx_b]:.4f}  Sigma: {cma_b.sigma:.4f}  HoF: {len(hof_b)}")
+        print(f"  Global best: A={best_fitness_a:.4f} B={best_fitness_b:.4f}  ({elapsed:.1f}s)")
 
-        # Save Checkpoint (using real params)
+        history.append({
+            "gen": gen + 1,
+            "best_a": float(best_fitness_a),
+            "best_b": float(best_fitness_b),
+            "sigma_a": float(cma_a.sigma),
+            "sigma_b": float(cma_b.sigma),
+        })
+
         if (gen + 1) % 5 == 0 or gen == args.generations - 1:
             save_checkpoint(run_dir, gen + 1, best_params_a, best_fitness_a, best_params_b, best_fitness_b, history)
 
@@ -475,21 +642,21 @@ def train(args):
 
 
 def save_checkpoint(run_dir, gen, params_a, fitness_a, params_b, fitness_b, history):
-    # (Same as before but params are real)
     checkpoint = {
         "generation": gen,
         "best_fitness_A": float(fitness_a),
         "best_fitness_B": float(fitness_b),
         "paramsA": {PARAM_NAMES[i]: float(params_a[i]) for i in range(N_PARAMS)},
         "paramsB": {PARAM_NAMES[i]: float(params_b[i]) for i in range(N_PARAMS)},
+        "history": history,
     }
     (run_dir / f"checkpoint_gen{gen:04d}.json").write_text(json.dumps(checkpoint, indent=2))
     (run_dir / "latest.json").write_text(json.dumps(checkpoint, indent=2))
     generate_rlconfig_java(params_a, run_dir / f"RLConfigA_gen{gen:04d}.java", f"RLConfigA_gen{gen:04d}", "algorithms.rl")
     generate_rlconfig_java(params_b, run_dir / f"RLConfigB_gen{gen:04d}.java", f"RLConfigB_gen{gen:04d}", "algorithms.rl")
 
+
 def export_best_policies(run_dir, params_a, fitness_a, params_b, fitness_b):
-    # (Same as before)
     best_dir = run_dir / "best_policy"
     best_dir.mkdir(exist_ok=True)
     payload_a = {"team": "A", "best_fitness": float(fitness_a), "params": {PARAM_NAMES[i]: float(params_a[i]) for i in range(N_PARAMS)}}
@@ -499,14 +666,15 @@ def export_best_policies(run_dir, params_a, fitness_a, params_b, fitness_b):
     generate_rlconfig_java(params_a, best_dir / "RLConfig_best_A.java", "RLConfig_best_A", "algorithms.rl")
     generate_rlconfig_java(params_b, best_dir / "RLConfig_best_B.java", "RLConfig_best_B", "algorithms.rl")
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--generations", type=int, default=50)
-    parser.add_argument("--pop", type=int, default=14)
-    parser.add_argument("--matches", type=int, default=3)
-    parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("--timeout", type=int, default=30000)
-    parser.add_argument("--resume-a", type=str, default=None)
-    parser.add_argument("--resume-b", type=str, default=None)
+    parser.add_argument("--pop",         type=int, default=14)
+    parser.add_argument("--matches",     type=int, default=3)
+    parser.add_argument("--workers",     type=int, default=4)
+    parser.add_argument("--timeout",     type=int, default=30000)
+    parser.add_argument("--resume-a",    type=str, default=None)
+    parser.add_argument("--resume-b",    type=str, default=None)
     args = parser.parse_args()
     train(args)

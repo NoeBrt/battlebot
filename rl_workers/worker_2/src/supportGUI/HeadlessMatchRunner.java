@@ -29,11 +29,8 @@ public class HeadlessMatchRunner {
         int winA, winB, draw;
         int deadMainA, deadSecA, deadMainB, deadSecB;
         double hpRatioA, hpRatioB;
-        double dmgMainByA, dmgSecByA;
-        double dmgMainByB, dmgSecByB;
         long elapsedMs;
         int teamAId, teamBId;
-        int fireCountA;
     }
 
     // Log stream: writes to file. Null if no log dir specified.
@@ -69,9 +66,8 @@ public class HeadlessMatchRunner {
         double[] diffs = new double[n];
         int winsA = 0, winsB = 0, draws = 0;
         double sumA = 0.0, sumB = 0.0;
-        int totalFireCountA = 0;
-        int totalDeadMainA = 0, totalDeadSecA = 0, totalDeadMainB = 0, totalDeadSecB = 0;
-        double sumDmgMainByA = 0.0, sumDmgSecByA = 0.0, sumDmgMainByB = 0.0, sumDmgSecByB = 0.0;
+        double sumDeadMainA = 0, sumDeadSecA = 0, sumDeadMainB = 0, sumDeadSecB = 0;
+        double sumHpA = 0, sumHpB = 0;
 
         for (int i = 0; i < n; i++) {
             System.out.printf(">>> Match %d/%d...", i + 1, n);
@@ -83,37 +79,41 @@ public class HeadlessMatchRunner {
             winsA += r.winA;
             winsB += r.winB;
             draws += r.draw;
-            totalFireCountA += r.fireCountA;
-            totalDeadMainA += r.deadMainA;
-            totalDeadSecA += r.deadSecA;
-            totalDeadMainB += r.deadMainB;
-            totalDeadSecB += r.deadSecB;
-            sumDmgMainByA += r.dmgMainByA;
-            sumDmgSecByA += r.dmgSecByA;
-            sumDmgMainByB += r.dmgMainByB;
-            sumDmgSecByB += r.dmgSecByB;
+            sumDeadMainA += r.deadMainA;
+            sumDeadSecA  += r.deadSecA;
+            sumDeadMainB += r.deadMainB;
+            sumDeadSecB  += r.deadSecB;
+            sumHpA       += r.hpRatioA;
+            sumHpB       += r.hpRatioB;
 
             String result = r.winA == 1 ? "A_WIN" : r.winB == 1 ? "B_WIN" : "DRAW";
             // Console: concise one-liner
-            System.out.printf(" %s  A=%.3f B=%.3f  fire=%d  (%.1fs)%n", result, r.scoreA, r.scoreB, r.fireCountA, r.elapsedMs / 1000.0);
+            System.out.printf(" %s  A=%.3f B=%.3f  (%.1fs)%n", result, r.scoreA, r.scoreB, r.elapsedMs / 1000.0);
             // Log file: full details
-            log.printf("MATCH %d: elapsed=%dms scoreA=%.3f scoreB=%.3f hpA=%.3f hpB=%.3f deadA(main=%d,sec=%d) deadB(main=%d,sec=%d) fireCountA=%d result=%s%n",
+            log.printf("MATCH %d: elapsed=%dms scoreA=%.3f scoreB=%.3f hpA=%.3f hpB=%.3f deadA(main=%d,sec=%d) deadB(main=%d,sec=%d) result=%s%n",
                     i + 1, r.elapsedMs, r.scoreA, r.scoreB, r.hpRatioA, r.hpRatioB,
-                    r.deadMainA, r.deadSecA, r.deadMainB, r.deadSecB, r.fireCountA, result);
+                    r.deadMainA, r.deadSecA, r.deadMainB, r.deadSecB, result);
         }
 
         double meanDiff = mean(diffs);
         double stdDiff = stddev(diffs, meanDiff);
 
         String summary = String.format(
-            "=== SUMMARY ===%nmatches=%d%navgScoreA=%.3f avgScoreB=%.3f%nwinRateA=%.3f winRateB=%.3f drawRate=%.3f%nmean(scoreA-scoreB)=%.3f std=%.3f%navgFireCountA=%.1f%navgDeadMainA=%.1f avgDeadSecA=%.1f%navgDeadMainB=%.1f avgDeadSecB=%.1f%navgDmgMainByA=%.3f avgDmgSecByA=%.3f%navgDmgMainByB=%.3f avgDmgSecByB=%.3f",
-                n, sumA / n, sumB / n,
+                "=== SUMMARY ===%n" +
+                "matches=%d%n" +
+                "avgScoreA=%.3f avgScoreB=%.3f%n" +
+                "winRateA=%.3f winRateB=%.3f drawRate=%.3f%n" +
+                "avgDeadMainA=%.3f avgDeadSecA=%.3f%n" +
+                "avgDeadMainB=%.3f avgDeadSecB=%.3f%n" +
+                "avgHpA=%.3f avgHpB=%.3f%n" +
+                "mean(scoreA-scoreB)=%.3f std=%.3f",
+                n,
+                sumA / n, sumB / n,
                 winsA / (double) n, winsB / (double) n, draws / (double) n,
-                meanDiff, stdDiff, totalFireCountA / (double) n,
-            totalDeadMainA / (double) n, totalDeadSecA / (double) n,
-                totalDeadMainB / (double) n, totalDeadSecB / (double) n,
-            sumDmgMainByA / n, sumDmgSecByA / n,
-            sumDmgMainByB / n, sumDmgSecByB / n);
+                sumDeadMainA / n, sumDeadSecA / n,
+                sumDeadMainB / n, sumDeadSecB / n,
+                sumHpA / n, sumHpB / n,
+                meanDiff, stdDiff);
         logBoth(summary);
         logBoth("Log saved: " + logFile.getAbsolutePath());
         log.close();
@@ -274,8 +274,6 @@ public class HeadlessMatchRunner {
         int deadMainA = 0, deadSecA = 0, aliveMainA = 0, aliveSecA = 0;
         int deadMainB = 0, deadSecB = 0, aliveMainB = 0, aliveSecB = 0;
         double aliveHealthWeightedA = 0.0, aliveHealthWeightedB = 0.0;
-        double aliveHealthMainA = 0.0, aliveHealthSecA = 0.0;
-        double aliveHealthMainB = 0.0, aliveHealthSecB = 0.0;
 
         if (teamAId == Integer.MIN_VALUE) teamAId = 0;
         if (teamBId == Integer.MIN_VALUE) teamBId = 1;
@@ -288,16 +286,12 @@ public class HeadlessMatchRunner {
                 else {
                     if (isMain) aliveMainA++; else aliveSecA++;
                     aliveHealthWeightedA += (isMain ? MAIN_W : SEC_W) * (b.getHealth() / b.getMaxHealth());
-                    if (isMain) aliveHealthMainA += (b.getHealth() / b.getMaxHealth());
-                    else aliveHealthSecA += (b.getHealth() / b.getMaxHealth());
                 }
             } else if (b.getTeam() == teamBId) {
                 if (dead) { if (isMain) deadMainB++; else deadSecB++; }
                 else {
                     if (isMain) aliveMainB++; else aliveSecB++;
                     aliveHealthWeightedB += (isMain ? MAIN_W : SEC_W) * (b.getHealth() / b.getMaxHealth());
-                    if (isMain) aliveHealthMainB += (b.getHealth() / b.getMaxHealth());
-                    else aliveHealthSecB += (b.getHealth() / b.getMaxHealth());
                 }
             }
         }
@@ -316,24 +310,10 @@ public class HeadlessMatchRunner {
         r.hpRatioB = aliveHealthWeightedB / totalW;
         r.deadMainA = deadMainA; r.deadSecA = deadSecA;
         r.deadMainB = deadMainB; r.deadSecB = deadSecB;
-        r.dmgMainByA = 1.0 - (aliveHealthMainB / 3.0);
-        r.dmgSecByA = 1.0 - (aliveHealthSecB / 2.0);
-        r.dmgMainByB = 1.0 - (aliveHealthMainA / 3.0);
-        r.dmgSecByB = 1.0 - (aliveHealthSecA / 2.0);
 
         if (r.scoreA > r.scoreB) r.winA = 1;
         else if (r.scoreB > r.scoreA) r.winB = 1;
         else r.draw = 1;
-
-        // Read and reset fire counter from RLBotBase (team A)
-        try {
-            Class<?> rlBase = Class.forName("algorithms.rl.RLBotBase");
-            Field fcField = rlBase.getField("fireCountA");
-            r.fireCountA = fcField.getInt(null);
-            fcField.setInt(null, 0);
-        } catch (Exception ignored) {
-            r.fireCountA = 0;
-        }
 
         return r;
     }
