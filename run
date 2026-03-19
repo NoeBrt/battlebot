@@ -1,0 +1,413 @@
+#!/usr/bin/env python3
+"""
+Battlebot headless runner - unified CLI for matches, benchmarks, and recordings.
+
+Config is loaded at runtime by the JVM — no Java source generation, no recompilation
+needed when switching configs. Just pass -c path/to/config.json.
+
+Usage:
+  ./run match -c rl_results/.../teamA_best_policy.json -o MacDuo
+  ./run match -o Stage8 -n 10
+  ./run benchmark -c rl_results/.../latest.json
+  ./run record output.mp4 -o FifthElement
+  ./run list
+  ./run train -- --workers 10 --generations 50
+"""
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+
+# ---------------------------------------------------------------------------
+# Opponent registry
+# ---------------------------------------------------------------------------
+OPPONENTS = {
+    "MacDuo":       ("algorithms.external.MacDuoMain",       "algorithms.external.MacDuoSecondary"),
+    "MacDuoUltra":  ("algorithms.external.MacDuoUltraMain",  "algorithms.external.MacDuoUltraSecondary"),
+    "FifthElement":  ("algorithms.external.FifthElementMain", "algorithms.external.FifthElementSecondary"),
+    "Superhero":    ("algorithms.external.SuperheroAMain",    "algorithms.external.SuperheroASecondary"),
+    "Stage8":       ("algorithms.external.Stage8MainA",       "algorithms.external.Stage8SecondaryA"),
+    "MecaMouse":    ("algorithms.external.MecaMouseMain",     "algorithms.external.MecaMouseSecondary"),
+    "Team":         ("algorithms.external.teamMain",          "algorithms.external.teamSecondary"),
+    "Claude":       ("algorithms.LLMS.ClaudeMain",            "algorithms.LLMS.ClaudeSecondary"),
+    "AdaptiveKite": ("algorithms.LLMS.AdaptiveKiteMain",      "algorithms.LLMS.AdaptiveKiteSecondary"),
+    "Self":         ("algorithms.rl.RLBotMain",               "algorithms.rl.RLBotSecondary"),
+}
+
+
+# ---------------------------------------------------------------------------
+# Config discovery
+# ---------------------------------------------------------------------------
+def find_configs():
+    """Find available checkpoint JSONs, newest first."""
+    configs = []
+    for pattern in ["rl_results/**/latest.json", "rl_results/**/checkpoint_*.json",
+                    "rl_results/**/best_policy/*.json", "rl_results/seed_config.json"]:
+        configs.extend(ROOT.glob(pattern))
+    seen = set()
+    unique = []
+    for c in sorted(configs, key=lambda p: p.stat().st_mtime, reverse=True):
+        if c not in seen:
+            seen.add(c)
+            unique.append(c)
+    return unique
+
+
+# ---------------------------------------------------------------------------
+# Opponent switching
+# ---------------------------------------------------------------------------
+def resolve_opponent(name):
+    """Case-insensitive opponent lookup."""
+    lower_map = {k.lower(): k for k in OPPONENTS}
+    key = lower_map.get(name.lower())
+    if not key:
+        print(f"Unknown opponent '{name}'.")
+        print(f"Available: {', '.join(sorted(OPPONENTS))}")
+        sys.exit(1)
+    return key
+
+
+def set_opponent(name):
+    """Patch Parameters.java to set the Team B opponent.
+    Requires recompilation afterwards (Java inlines static final Strings)."""
+    name = resolve_opponent(name)
+    main_cls, sec_cls = OPPONENTS[name]
+    p = ROOT / "src" / "characteristics" / "Parameters.java"
+    txt = p.read_text()
+
+    txt = re.sub(
+        r'(public static final String teamBName = )".*?"',
+        f'\\1"{name}"', txt)
+    txt = re.sub(
+        r'(public static final String teamBMainBotBrainClassName = )".*?"',
+        f'\\1"{main_cls}"', txt)
+    txt = re.sub(
+        r'(public static final String teamBSecondaryBotBrainClassName = )".*?"',
+        f'\\1"{sec_cls}"', txt)
+
+    p.write_text(txt)
+    print(f"Opponent: {name}")
+
+
+def get_current_opponent():
+    """Read the current opponent from Parameters.java."""
+    p = ROOT / "src" / "characteristics" / "Parameters.java"
+    txt = p.read_text()
+    m = re.search(r'teamBName = "(.*?)"', txt)
+    return m.group(1) if m else "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Compilation
+# ---------------------------------------------------------------------------
+def compile_all():
+    """Clean compile all Java sources. Full rebuild needed because javac
+    inlines 'public static final String' constants from Parameters.java."""
+    beans = ROOT / "beans"
+    if beans.exists():
+        shutil.rmtree(beans)
+    beans.mkdir()
+
+    sources = list((ROOT / "src").rglob("*.java"))
+    sources_file = ROOT / "sources.txt"
+    sources_file.write_text("\n".join(str(s) for s in sources))
+
+    result = subprocess.run(
+        ["javac", "-cp", f"{ROOT}/jars/*", "-d", str(beans),
+         "--release", "11", f"@{sources_file}"],
+        capture_output=True, text=True, cwd=str(ROOT), timeout=60)
+
+    sources_file.unlink(missing_ok=True)
+
+    if result.returncode != 0:
+        print(f"Compile failed:\n{result.stderr[:2000]}")
+        sys.exit(1)
+    print("Compiled.")
+
+
+def needs_compile(opponent_changed):
+    """Check if we need to recompile."""
+    beans = ROOT / "beans"
+    if not beans.exists() or not list(beans.rglob("*.class")):
+        return True
+    if opponent_changed:
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Match execution
+# ---------------------------------------------------------------------------
+def build_java_cmd(config=None):
+    """Build the base java command, optionally with -Drl.config."""
+    cmd = ["java"]
+    if config:
+        abspath = str(Path(config).resolve())
+        cmd.append(f"-Drl.config={abspath}")
+    cmd.extend(["-cp", f"{ROOT}/jars/*:{ROOT}/beans"])
+    return cmd
+
+
+def run_headless(matches=5, timeout=90000, delay=1, log_dir="logs",
+                 config=None, capture=False):
+    """Run HeadlessMatchRunner. Returns stdout if capture=True."""
+    (ROOT / log_dir).mkdir(exist_ok=True)
+
+    cmd = build_java_cmd(config)
+    cmd.extend(["supportGUI.HeadlessMatchRunner",
+                str(matches), str(timeout), str(delay), log_dir])
+
+    if shutil.which("xvfb-run") and not os.environ.get("DISPLAY"):
+        cmd = ["xvfb-run", "-a"] + cmd
+
+    if capture:
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                cwd=str(ROOT),
+                                timeout=(timeout / 1000.0 * matches + 120))
+        print(result.stdout, end="")
+        if result.stderr:
+            print(result.stderr, end="", file=sys.stderr)
+        return result.stdout
+    else:
+        subprocess.run(cmd, cwd=str(ROOT))
+        return None
+
+
+def parse_summary(output):
+    """Parse HeadlessMatchRunner summary line."""
+    r = {}
+    m = re.search(r"winRateA=([\d.]+)", output)
+    if m: r["winRate"] = float(m.group(1))
+    m = re.search(r"avgScoreA=([\d.]+)\s+avgScoreB=([\d.]+)", output)
+    if m:
+        r["scoreA"] = float(m.group(1))
+        r["scoreB"] = float(m.group(2))
+    m = re.search(r"avgHpA=([\d.]+)\s+avgHpB=([\d.]+)", output)
+    if m:
+        r["hpA"] = float(m.group(1))
+        r["hpB"] = float(m.group(2))
+    return r
+
+
+def run_record(output_path, config=None):
+    """Record a match to MP4 via xvfb + ffmpeg."""
+    if not shutil.which("ffmpeg"):
+        print("Error: ffmpeg required for recording")
+        sys.exit(1)
+    if not shutil.which("xvfb-run"):
+        print("Error: xvfb-run required for recording")
+        sys.exit(1)
+
+    java_opts = ""
+    if config:
+        abspath = str(Path(config).resolve())
+        java_opts = f"-Drl.config={abspath} "
+
+    script = (
+        f'ffmpeg -y -nostdin -f x11grab -draw_mouse 0 -framerate 30 '
+        f'-video_size 1280x720 -i :${{DISPLAY##*:}} '
+        f'-c:v libx264 -pix_fmt yuv420p -preset ultrafast {output_path} & PID=$!; '
+        f'sleep 2; java {java_opts}-cp {ROOT}/jars/*:{ROOT}/beans '
+        f'supportGUI.AutoRecordingViewer; kill $PID'
+    )
+    subprocess.run(
+        ["xvfb-run", "-a", "-s", "-screen 0 1280x720x24", "bash", "-c", script],
+        cwd=str(ROOT))
+    print(f"Recording saved: {output_path}")
+
+
+# ---------------------------------------------------------------------------
+# Subcommands
+# ---------------------------------------------------------------------------
+def cmd_match(args):
+    opponent_changed = False
+    if args.opponent:
+        set_opponent(args.opponent)
+        opponent_changed = True
+    else:
+        print(f"Opponent: {get_current_opponent()} (current)")
+
+    if needs_compile(opponent_changed):
+        compile_all()
+
+    if args.config:
+        p = Path(args.config)
+        if not p.exists():
+            print(f"Error: config file not found: {args.config}")
+            sys.exit(1)
+        print(f"Config: {p}")
+
+    run_headless(matches=args.matches, timeout=args.timeout,
+                 delay=args.delay, log_dir=args.log_dir,
+                 config=args.config)
+
+
+def cmd_benchmark(args):
+    if args.config:
+        p = Path(args.config)
+        if not p.exists():
+            print(f"Error: config file not found: {args.config}")
+            sys.exit(1)
+        print(f"Config: {p}")
+
+    opponents = [name for name in sorted(OPPONENTS) if name != "Self" or args.include_self]
+    results = []
+
+    for name in opponents:
+        print(f"\n{'='*55}")
+        set_opponent(name)
+        compile_all()
+        output = run_headless(matches=args.matches, timeout=args.timeout,
+                              delay=0, log_dir=args.log_dir,
+                              config=args.config, capture=True)
+        parsed = parse_summary(output) if output else {}
+        results.append((name, parsed))
+
+    print(f"\n{'='*65}")
+    print("  BENCHMARK SUMMARY")
+    print(f"{'='*65}")
+    print(f"  {'Opponent':15} {'WinRate':>8} {'ScoreA':>8} {'ScoreB':>8} {'HpA':>6} {'HpB':>6}")
+    print(f"  {'-'*57}")
+    for name, r in results:
+        wr = r.get("winRate", 0)
+        sa = r.get("scoreA", 0)
+        sb = r.get("scoreB", 0)
+        ha = r.get("hpA", 0)
+        hb = r.get("hpB", 0)
+        flag = " WIN" if wr > 0.5 else (" DRAW" if wr == 0.5 else "")
+        print(f"  {name:15} {wr:>8.2f} {sa:>8.3f} {sb:>8.3f} {ha:>6.3f} {hb:>6.3f}{flag}")
+    print(f"  {'-'*57}")
+
+
+def cmd_record(args):
+    opponent_changed = False
+    if args.opponent:
+        set_opponent(args.opponent)
+        opponent_changed = True
+    else:
+        print(f"Opponent: {get_current_opponent()} (current)")
+
+    if needs_compile(opponent_changed):
+        compile_all()
+
+    if args.config:
+        p = Path(args.config)
+        if not p.exists():
+            print(f"Error: config file not found: {args.config}")
+            sys.exit(1)
+        print(f"Config: {p}")
+
+    run_record(args.output, config=args.config)
+
+
+def cmd_list(args):
+    print("OPPONENTS:")
+    for name in sorted(OPPONENTS):
+        main_cls, _ = OPPONENTS[name]
+        print(f"  {name:15} {main_cls}")
+
+    current = get_current_opponent()
+    print(f"\nCurrent opponent in Parameters.java: {current}")
+
+    print("\nCONFIG FILES (newest first):")
+    configs = find_configs()
+    if not configs:
+        print("  (none found in rl_results/)")
+    for c in configs[:20]:
+        rel = c.relative_to(ROOT)
+        try:
+            data = json.loads(c.read_text())
+            gen = data.get("generation", "?")
+            fit = data.get("best_fitness_A", data.get("best_fitness", "?"))
+            if isinstance(fit, float):
+                fit = f"{fit:.4f}"
+            print(f"  {str(rel):50} gen={gen} fitness={fit}")
+        except Exception:
+            print(f"  {rel}")
+
+
+def cmd_train(args):
+    trainer = ROOT / "train_rl_genetic_tournament.py"
+    if not trainer.exists():
+        print(f"Error: {trainer} not found")
+        sys.exit(1)
+    cmd = [sys.executable, str(trainer)] + args.train_args
+    subprocess.run(cmd, cwd=str(ROOT))
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+def main():
+    parser = argparse.ArgumentParser(
+        prog="./run",
+        description="Battlebot headless runner",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+examples:
+  ./run match -c rl_results/run_.../teamA_best_policy.json -o MacDuo
+  ./run match -o Stage8 -n 10
+  ./run match                                   (uses current config & opponent)
+  ./run benchmark -c rl_results/.../latest.json
+  ./run record output.mp4 -o FifthElement -c path/to/config.json
+  ./run list
+  ./run train -- --workers 10 --generations 50
+""")
+
+    sub = parser.add_subparsers(dest="command")
+
+    # match
+    p = sub.add_parser("match", help="Run headless matches")
+    p.add_argument("-o", "--opponent", help="Opponent name (see 'list')")
+    p.add_argument("-c", "--config", help="Path to JSON config from training")
+    p.add_argument("-n", "--matches", type=int, default=5)
+    p.add_argument("-t", "--timeout", type=int, default=90000, help="ms per match")
+    p.add_argument("-d", "--delay", type=int, default=1, help="tick delay ms")
+    p.add_argument("--log-dir", default="logs")
+
+    # benchmark
+    p = sub.add_parser("benchmark", help="Run vs all opponents")
+    p.add_argument("-c", "--config", help="Path to JSON config from training")
+    p.add_argument("-n", "--matches", type=int, default=3, help="per opponent")
+    p.add_argument("-t", "--timeout", type=int, default=90000)
+    p.add_argument("--log-dir", default="logs")
+    p.add_argument("--include-self", action="store_true", help="include mirror match")
+
+    # record
+    p = sub.add_parser("record", help="Record a match to MP4")
+    p.add_argument("output", help="output.mp4")
+    p.add_argument("-o", "--opponent", help="Opponent name")
+    p.add_argument("-c", "--config", help="Path to JSON config from training")
+
+    # list
+    sub.add_parser("list", help="List opponents and config files")
+
+    # train
+    p = sub.add_parser("train", help="Start CMA-ES training (pass-through)")
+    p.add_argument("train_args", nargs="*", help="args forwarded to trainer")
+
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(0)
+
+    commands = {
+        "match": cmd_match,
+        "benchmark": cmd_benchmark,
+        "record": cmd_record,
+        "list": cmd_list,
+        "train": cmd_train,
+    }
+    commands[args.command](args)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,4 +1,4 @@
-# Java Compiled Files
+# Java compiled
 beans/
 *.class
 
@@ -9,16 +9,17 @@ __pycache__/
 .venv/
 venv/
 
-# Environment / Logs / Results
+# Training artifacts
 rl_results/
 rl_workers/
 logs/
 verification_logs/
+sources.txt
+training.pid
+
+# Media / Logs
 *.mp4
 *.log
-record_log.txt
-training.pid
-sources.txt
 
-# Temporary exports
+# Exports
 rl_bot_export/

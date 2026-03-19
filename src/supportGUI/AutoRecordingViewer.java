@@ -2,132 +2,113 @@ package supportGUI;
 
 import robotsimulator.SimulatorEngine;
 import robotsimulator.Bot;
-import javax.swing.Timer;
-import java.awt.Robot;
-import java.awt.event.KeyEvent;
+
+import javax.swing.*;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 
+/**
+ * Recording-friendly match launcher. Uses the same reflection-based startup
+ * as HeadlessMatchRunner but keeps the window visible for screen capture.
+ * Exits when one team is eliminated or after a 5-minute timeout.
+ */
 public class AutoRecordingViewer {
     public static void main(String[] args) {
         try {
-            System.out.println("AutoRecordingViewer: Starting Viewer...");
-            
-            // 1. Launch the original Viewer
-            new Thread(() -> {
-                try {
-                    supportGUI.Viewer.main(new String[0]);
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            }).start();
-
-            // 2. Wait for GUI initialization
-            Thread.sleep(5000); // 5s to be safe
-
-            // 3. Automate Key Inputs (More robust sequence)
-            Robot robot = new Robot();
-            System.out.println("Pressing keys...");
-            
-            // Splash screen?
-            robot.keyPress(KeyEvent.VK_SPACE);
-            robot.keyRelease(KeyEvent.VK_SPACE);
-            Thread.sleep(500);
-            
-            // Maybe ENTER to start?
-            robot.keyPress(KeyEvent.VK_ENTER);
-            robot.keyRelease(KeyEvent.VK_ENTER);
-            Thread.sleep(500);
-
-            // Maybe P to play?
-            robot.keyPress(KeyEvent.VK_P);
-            robot.keyRelease(KeyEvent.VK_P);
-            Thread.sleep(500);
-            
-            // Try SPACE again
-            robot.keyPress(KeyEvent.VK_SPACE);
-            robot.keyRelease(KeyEvent.VK_SPACE);
-            Thread.sleep(500);
-
-            // 4. Hook internal engine state
-            Field framedGuiField = supportGUI.Viewer.class.getDeclaredField("framedGUI");
-            framedGuiField.setAccessible(true);
-            Object framedGui = null;
-            
-            for (int i=0; i<20; i++) {
-                try {
-                    framedGui = framedGuiField.get(null);
-                    if (framedGui != null) break;
-                } catch (Exception e) {}
-                Thread.sleep(500);
+            long timeoutMs = 300000; // 5 minutes
+            if (args.length > 0) {
+                timeoutMs = Long.parseLong(args[0]);
             }
-            if (framedGui == null) {
-                System.out.println("Failed to access GUI. Exiting.");
+
+            System.out.println("AutoRecordingViewer: launching...");
+
+            // 1. Launch Viewer (posts to EDT asynchronously)
+            Viewer.main(new String[0]);
+
+            // 2. Wait for framedGUI to be created
+            Field framedGuiField = Viewer.class.getDeclaredField("framedGUI");
+            framedGuiField.setAccessible(true);
+            JFrame frame = null;
+            for (int i = 0; i < 50; i++) {
+                Thread.sleep(100);
+                frame = (JFrame) framedGuiField.get(null);
+                if (frame != null) break;
+            }
+            if (frame == null) {
+                System.err.println("GUI did not initialize");
                 System.exit(1);
             }
+            SwingUtilities.invokeAndWait(() -> {});
 
-            Field mainPanelField = framedGui.getClass().getDeclaredField("mainPanel");
+            // 3. Get mainPanel
+            Field mainPanelField = FramedGUI.class.getDeclaredField("mainPanel");
             mainPanelField.setAccessible(true);
-            Object mainPanel = mainPanelField.get(framedGui);
+            Object mainPanel = mainPanelField.get(frame);
 
-            Field simField = mainPanel.getClass().getDeclaredField("sim");
+            // 4. Press button 1: firstAction() — greeting -> simulator panel
+            Method firstAction = MainPanel.class.getDeclaredMethod("firstAction");
+            firstAction.setAccessible(true);
+            final Object mp = mainPanel;
+            SwingUtilities.invokeAndWait(() -> {
+                try { firstAction.invoke(mp); } catch (Exception e) { throw new RuntimeException(e); }
+            });
+            Thread.sleep(300);
+
+            // 5. Press button 2: startSimulation() — start the engine
+            Method startSim = MainPanel.class.getDeclaredMethod("startSimulation");
+            startSim.setAccessible(true);
+            SwingUtilities.invokeAndWait(() -> {
+                try { startSim.invoke(mp); } catch (Exception e) { throw new RuntimeException(e); }
+            });
+
+            // 6. Get the engine
+            Field simField = MainPanel.class.getDeclaredField("sim");
             simField.setAccessible(true);
             Object simPanel = simField.get(mainPanel);
 
-            Field engineField = simPanel.getClass().getDeclaredField("engine");
+            Field engineField = SimulatorPanel.class.getDeclaredField("engine");
             engineField.setAccessible(true);
             SimulatorEngine engine = (SimulatorEngine) engineField.get(simPanel);
 
-            System.out.println("Engine hooked. Monitoring health...");
-            
-            long startTime = System.currentTimeMillis();
-            boolean matchRunning = false;
-            
-            while (true) {
-                ArrayList<Bot> bots = engine.getBots();
-                if (bots != null) {
-                    if (bots.size() == 0) {
-                        System.out.println("No bots found...");
-                    } else {
-                        System.out.println("Bots detected: " + bots.size());
-                    }
-                    
-                    int aliveTeamA = 0;
-                    int aliveTeamB = 0;
-                    // Usually total ~6 bots?
-                    for (Bot b : bots) {
-                        if (b.getHealth() > 0) {
-                            if (b.getTeam() == 0) aliveTeamA++;
-                            else aliveTeamB++;
-                        }
-                    }
-                    
-                    if (!matchRunning) {
-                        if (aliveTeamA > 0 && aliveTeamB > 0) {
-                            matchRunning = true;
-                            System.out.println("Match detected running (A:" + aliveTeamA + " B:" + aliveTeamB + ")");
-                        } else {
-                            // Try forcing start if not running yet?
-                            if (System.currentTimeMillis() - startTime > 10000 && !matchRunning) {
-                                // Maybe press SPACE?
-                            }
-                        }
-                    } else {
-                        // Match running
-                        if (aliveTeamA == 0 || aliveTeamB == 0) {
-                            System.out.println("Match finished. Exiting.");
-                            Thread.sleep(10000); // 6s to see end
-                            System.exit(0);
-                        }
-                    }
-                }
-                
-                if (System.currentTimeMillis() - startTime > 300000) { // 90s max
-                    System.out.println("Timeout reached.");
-                    System.exit(0);
-                }
+            System.out.println("Match started. Monitoring...");
+
+            // 7. Monitor until one team is eliminated or timeout
+            long start = System.currentTimeMillis();
+            int teamAId = Integer.MIN_VALUE;
+            int teamBId = Integer.MIN_VALUE;
+
+            while (System.currentTimeMillis() - start < timeoutMs) {
                 Thread.sleep(500);
+                ArrayList<Bot> bots = engine.getBots();
+                if (bots == null || bots.isEmpty()) continue;
+
+                // Discover team IDs
+                for (Bot b : bots) {
+                    int t = b.getTeam();
+                    if (teamAId == Integer.MIN_VALUE) teamAId = t;
+                    else if (t != teamAId && teamBId == Integer.MIN_VALUE) teamBId = t;
+                }
+                if (teamAId == Integer.MIN_VALUE || teamBId == Integer.MIN_VALUE) continue;
+
+                // Check end: one team fully dead
+                boolean aAlive = false, bAlive = false;
+                for (Bot b : bots) {
+                    if (!b.isDestroyed()) {
+                        if (b.getTeam() == teamAId) aAlive = true;
+                        if (b.getTeam() == teamBId) bAlive = true;
+                    }
+                }
+                if (!aAlive || !bAlive) {
+                    String winner = !aAlive ? "B" : "A";
+                    System.out.println("Match over. Winner: Team " + winner);
+                    Thread.sleep(3000); // linger so the recording catches the end
+                    break;
+                }
             }
+
+            System.out.println("Exiting.");
+            System.exit(0);
 
         } catch (Exception e) {
             e.printStackTrace();
