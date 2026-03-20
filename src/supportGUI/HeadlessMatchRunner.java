@@ -68,6 +68,7 @@ public class HeadlessMatchRunner {
         double sumA = 0.0, sumB = 0.0;
         double sumDeadMainA = 0, sumDeadSecA = 0, sumDeadMainB = 0, sumDeadSecB = 0;
         double sumHpA = 0, sumHpB = 0;
+        long sumTimeMs = 0;
 
         for (int i = 0; i < n; i++) {
             System.out.printf(">>> Match %d/%d...", i + 1, n);
@@ -85,6 +86,7 @@ public class HeadlessMatchRunner {
             sumDeadSecB  += r.deadSecB;
             sumHpA       += r.hpRatioA;
             sumHpB       += r.hpRatioB;
+            sumTimeMs    += r.elapsedMs;
 
             String result = r.winA == 1 ? "A_WIN" : r.winB == 1 ? "B_WIN" : "DRAW";
             // Console: concise one-liner
@@ -106,6 +108,7 @@ public class HeadlessMatchRunner {
                 "avgDeadMainA=%.3f avgDeadSecA=%.3f%n" +
                 "avgDeadMainB=%.3f avgDeadSecB=%.3f%n" +
                 "avgHpA=%.3f avgHpB=%.3f%n" +
+                "avgTimeMs=%.0f%n" +
                 "mean(scoreA-scoreB)=%.3f std=%.3f",
                 n,
                 sumA / n, sumB / n,
@@ -113,6 +116,7 @@ public class HeadlessMatchRunner {
                 sumDeadMainA / n, sumDeadSecA / n,
                 sumDeadMainB / n, sumDeadSecB / n,
                 sumHpA / n, sumHpB / n,
+                sumTimeMs / (double) n,
                 meanDiff, stdDiff);
         logBoth(summary);
         logBoth("Log saved: " + logFile.getAbsolutePath());

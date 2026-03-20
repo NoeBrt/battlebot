@@ -39,6 +39,7 @@ OPPONENTS = {
     "Claude":       ("algorithms.LLMS.ClaudeMain",            "algorithms.LLMS.ClaudeSecondary"),
     "AdaptiveKite": ("algorithms.LLMS.AdaptiveKiteMain",      "algorithms.LLMS.AdaptiveKiteSecondary"),
     "Self":         ("algorithms.rl.RLBotMain",               "algorithms.rl.RLBotSecondary"),
+    "TBot":         ("algorithms.tbot.TBotMain",              "algorithms.tbot.TBotSecondary"),
 }
 
 
