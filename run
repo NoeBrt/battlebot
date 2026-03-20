@@ -37,6 +37,7 @@ OPPONENTS = {
     "MecaMouse":    ("algorithms.external.MecaMouseMain",     "algorithms.external.MecaMouseSecondary"),
     "Team":         ("algorithms.external.teamMain",          "algorithms.external.teamSecondary"),
     "Claude":       ("algorithms.LLMS.ClaudeMain",            "algorithms.LLMS.ClaudeSecondary"),
+    "Yomi":         ("algorithms.home.Main",              "algorithms.home.Secondary"),
     "AdaptiveKite": ("algorithms.LLMS.AdaptiveKiteMain",      "algorithms.LLMS.AdaptiveKiteSecondary"),
     "Self":         ("algorithms.rl.RLBotMain",               "algorithms.rl.RLBotSecondary"),
 }
@@ -121,7 +122,7 @@ def compile_all():
 
     result = subprocess.run(
         ["javac", "-cp", f"{ROOT}/jars/*", "-d", str(beans),
-         "--release", "11", f"@{sources_file}"],
+         "--release", "17", f"@{sources_file}"],
         capture_output=True, text=True, cwd=str(ROOT), timeout=60)
 
     sources_file.unlink(missing_ok=True)
