@@ -1,5 +1,5 @@
 # TBot CMA-ES Training Guide
-
+test
 ## Overview
 
 TBot (TacticalBot) is a multi-agent combat strategy for the Simovies robot simulator. Its behavior is governed by **72 numeric parameters** that control target selection, movement, formation, firing, and coordination. These parameters are optimized using **CMA-ES** (Covariance Matrix Adaptation Evolution Strategy), a derivative-free evolutionary optimizer well-suited for high-dimensional continuous search spaces.
