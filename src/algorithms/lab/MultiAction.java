@@ -11,6 +11,8 @@ public class MultiAction extends Brain {
     private double previous_angle;
     private boolean turnRightTask;
     private int i;
+    private int k;
+    private Parameters.Direction dir;
 
     @Override
     public void activate() {
@@ -18,14 +20,12 @@ public class MultiAction extends Brain {
         previous_angle = getHeading();
         turnRightTask = false;
         i = 0;
+        k = 0;
+        dir = Parameters.Direction.RIGHT;
     }
 
     @Override
     public void step() {
-        if (Math.random()<0.01) {
-            fire(Math.random()*Math.PI*2);
-            return;
-        }
         if (!initDirTaskDone) {
             if (!SameDirection.compute(getHeading(), Parameters.EAST)) {
                 stepTurn(Parameters.Direction.LEFT);
@@ -35,20 +35,19 @@ public class MultiAction extends Brain {
             }
             return;
         }
-        if (detectRadar().stream().anyMatch(o -> IRadarResult.Types.OpponentSecondaryBot != o.getObjectType()) && !turnRightTask) {
-//            if (i % 2 == 0) {
-//                stepTurn(Parameters.Direction.RIGHT);
-//            } else {
-//
-//            }
+        if (i % 5 == 4) k++;
+        if (k % 2 == 0) dir =  Parameters.Direction.RIGHT;
+        else dir = Parameters.Direction.LEFT;
+
+        if (i % 5 == 0) {
+            stepTurn(dir);
+        }
+        else if (i % 5 == 1 || i % 5 == 2 || i % 5 == 3) {
             move();
-            i++;
-            return;
+        } else {
+            fire(Math.random()*Math.PI*2);
         }
-        if (detectRadar().stream().anyMatch(o -> IRadarResult.Types.OpponentSecondaryBot == o.getObjectType())) {
-            stepTurn(Parameters.Direction.RIGHT);
-            return;
-        }
+        i++;
     }
 
 }
