@@ -2,6 +2,7 @@ package algorithms.lab;
 
 import characteristics.IRadarResult;
 import characteristics.IFrontSensorResult;
+import characteristics.Parameters;
 import robotsimulator.Brain;
 
 import java.util.ArrayList;
@@ -10,7 +11,30 @@ public abstract class NoeAbstractBot extends Brain {
 
   // Format broadcast : "id:state|x:val|y:val|tx:val|ty:val|hp:val"
   protected record BotMessage(int senderId, int senderState, double x, double y,
-                              double targetX, double targetY, double hp) {}
+                              double targetX, double targetY, double hp) {
+    protected boolean targetFound() {
+      return !Double.isNaN(targetX) && !Double.isNaN(targetY);
+    }
+  }
+
+  protected enum State {
+    MOVE_FORWARD,
+    IDLE_WATCH,
+    FIRE,
+    REPOSITION,
+    DODGE,
+    ATTACK_MODE,
+    MOVE_SLALOM
+    }
+
+  protected static final int M1  = 0;
+  protected static final int M2 = 1;
+  protected static final int M3  = 2;
+  protected static final int S1 = 3;
+  protected static final int S2 = 4;
+
+  protected static final double ANGLEPRECISION = 0.001;
+  protected static final double SECONDARY_RADAR_RANGE = Parameters.teamASecondaryBotFrontalDetectionRange;
 
   protected final ArrayList<BotMessage> teamMessages = new ArrayList<>();
 
@@ -20,9 +44,18 @@ public abstract class NoeAbstractBot extends Brain {
   protected double targetY = Double.NaN;
   protected double myHp = 1.0;
   protected int myId;
-  protected int currentState;
+  protected State currentState;
+  protected boolean isTeamA;
 
-  protected void initState(int initialState, double startX, double startY) {
+  protected int curveN;                          // ticks d'avance par segment
+  protected int curveK;                          // ticks de rotation par segment
+  protected int curveTick      = 0;              // tick courant dans le segment
+  protected boolean curveMoving;                 // true = phase move, false = phase turn
+  protected boolean curveAlternateState = false; // alternate L/R à chaque segment
+  protected boolean curveActive         = false;
+  protected Parameters.Direction curveTurnDir;
+
+  protected void initState(State initialState, double startX, double startY) {
     currentState = initialState;
     myX = startX;
     myY = startY;
@@ -32,6 +65,7 @@ public abstract class NoeAbstractBot extends Brain {
   protected void stepState() {
     myHp = getHealth();
     receiveMessages();
+    sendLogMessage("[MainBot: " + myId + "] " + myX + "," + myY );
     onStep();
   }
 
@@ -98,6 +132,10 @@ public abstract class NoeAbstractBot extends Brain {
     return detectFront().getObjectType() == IFrontSensorResult.Types.WALL;
   }
 
+  protected boolean isFrontObstacle() {
+    return !(detectFront().getObjectType() == IFrontSensorResult.Types.NOTHING);
+  }
+
   protected IRadarResult nearestEnemy() {
     IRadarResult nearest = null;
     double minDist = Double.MAX_VALUE;
@@ -113,6 +151,10 @@ public abstract class NoeAbstractBot extends Brain {
   protected boolean isEnemy(IRadarResult r) {
     return r.getObjectType() == IRadarResult.Types.OpponentMainBot
       || r.getObjectType() == IRadarResult.Types.OpponentSecondaryBot;
+  }
+
+  protected boolean isSecondaryEnemy(IRadarResult r) {
+    return r.getObjectType() == IRadarResult.Types.OpponentSecondaryBot;
   }
 
   // ----------------------------------------------------------
@@ -144,5 +186,58 @@ public abstract class NoeAbstractBot extends Brain {
 
   protected double round2(double v) {
     return Math.round(v * 100.0) / 100.0;
+  }
+
+  protected boolean isSameDirection(double dir1, double dir2) {
+    double diff = Math.abs(normalizeAngle(dir1) - normalizeAngle(dir2));
+    return diff < ANGLEPRECISION || Math.abs(diff - 2 * Math.PI) < ANGLEPRECISION;
+  }
+
+  // alternate=false : même sens → arc/orbital   |   alternate=true : L/R → slalom/zigzag
+  protected void startCurvedMove(int n, int k, Parameters.Direction dir, boolean alternate) {
+    curveN              = n;
+    curveK              = k;
+    curveTurnDir        = dir;
+    curveMoving         = true;
+    curveTick           = 0;
+    curveActive         = true;
+    curveAlternateState = alternate;
+  }
+
+  // Exécute un tick du mouvement courbé.
+  // Retourne true tant que le mouvement est actif, false si stopCurvedMove() a été appelé.
+  // À appeler une fois par step dans onStep() quand le bot est en mode déplacement courbé.
+  protected boolean stepCurvedMove(double stepSize) {
+    if (!curveActive) return false;
+
+    if (curveMoving) {
+      move();
+      updatePosition(stepSize);
+      curveTick++;
+      if (curveTick >= curveN) {
+        curveTick   = 0;
+        curveMoving = false; // bascule en phase rotation
+      }
+    } else {
+      stepTurn(curveTurnDir);
+      curveTick++;
+      if (curveTick >= curveK) {
+        curveTick   = 0;
+        curveMoving = true; // bascule en phase avance
+        if (curveAlternateState) // inverse la direction pour slalom
+          curveTurnDir = (curveTurnDir == Parameters.Direction.RIGHT)
+            ? Parameters.Direction.LEFT
+            : Parameters.Direction.RIGHT;
+      }
+    }
+    return true;
+  }
+
+  protected void stopCurvedMove() {
+    curveActive = false;
+  }
+
+  protected boolean isCurvedMoveActive() {
+    return curveActive;
   }
 }
