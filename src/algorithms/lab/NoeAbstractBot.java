@@ -9,13 +9,36 @@ import java.util.ArrayList;
 
 public abstract class NoeAbstractBot extends Brain {
 
-  // Format broadcast : "id:state|x:val|y:val|tx:val|ty:val|hp:val"
-  protected record BotMessage(int senderId, int senderState, double x, double y,
-                              double targetX, double targetY, double hp) {
-    protected boolean targetFound() {
-      return !Double.isNaN(targetX) && !Double.isNaN(targetY);
+  // ------------------------------------------------------------------ //
+  //  Format broadcast : "id:state|x:val|y:val|tx:val|ty:val|hp:val|ta:val"
+  //  Champ "ta" (target age en ticks) ajouté pour la fraîcheur de cible.
+  // ------------------------------------------------------------------ //
+  protected record BotMessage(int senderId, State senderState,
+                              double x, double y,
+                              double targetX, double targetY,
+                              double hp, int targetAge) {}
+
+  // ------------------------------------------------------------------ //
+  //  Suivi de cible avec horodatage (en ticks simulés)
+  // ------------------------------------------------------------------ //
+  protected static class TargetInfo {
+    double x, y;
+    int age;          // nombre de ticks depuis la dernière observation
+    boolean valid;
+
+    TargetInfo() { valid = false; age = Integer.MAX_VALUE; }
+
+    void update(double nx, double ny) {
+      x = nx; y = ny; age = 0; valid = true;
     }
+
+    void tick() { if (valid) age++; }
+
+    /** Une cible est considérée périmée après MAX_TARGET_AGE ticks sans confirmation. */
+    boolean isStale(int maxAge) { return !valid || age > maxAge; }
   }
+
+  protected static final int MAX_TARGET_AGE = 30; // ticks avant d'oublier la cible
 
   protected enum State {
     MOVE_FORWARD,
@@ -24,12 +47,13 @@ public abstract class NoeAbstractBot extends Brain {
     REPOSITION,
     DODGE,
     ATTACK_MODE,
-    MOVE_SLALOM
-    }
+    MOVE_SLALOM,
+    RADAR_MODE
+  }
 
-  protected static final int M1  = 0;
+  protected static final int M1 = 0;
   protected static final int M2 = 1;
-  protected static final int M3  = 2;
+  protected static final int M3 = 2;
   protected static final int S1 = 3;
   protected static final int S2 = 4;
 
@@ -40,20 +64,29 @@ public abstract class NoeAbstractBot extends Brain {
 
   protected double myX = 0;
   protected double myY = 0;
-  protected double targetX = Double.NaN; // cible courante estimée
-  protected double targetY = Double.NaN;
+
+  // Remplace les anciens targetX/targetY/targetFound par un TargetInfo structuré
+  protected final TargetInfo target = new TargetInfo();
+
+  /** Accesseurs de compatibilité (évite de casser les appels existants) */
+  protected double targetX() { return target.x; }
+  protected double targetY() { return target.y; }
+  protected boolean targetFound() { return target.valid && !target.isStale(MAX_TARGET_AGE); }
+
   protected double myHp = 1.0;
   protected int myId;
   protected State currentState;
   protected boolean isTeamA;
 
-  protected int curveN;                          // ticks d'avance par segment
-  protected int curveK;                          // ticks de rotation par segment
-  protected int curveTick      = 0;              // tick courant dans le segment
-  protected boolean curveMoving;                 // true = phase move, false = phase turn
-  protected boolean curveAlternateState = false; // alternate L/R à chaque segment
-  protected boolean curveActive         = false;
+  protected int curveN;
+  protected int curveK;
+  protected int curveTick = 0;
+  protected boolean curveMoving;
+  protected boolean curveAlternateState = false;
+  protected boolean curveActive = false;
   protected Parameters.Direction curveTurnDir;
+
+  // ------------------------------------------------------------------ //
 
   protected void initState(State initialState, double startX, double startY) {
     currentState = initialState;
@@ -64,21 +97,42 @@ public abstract class NoeAbstractBot extends Brain {
 
   protected void stepState() {
     myHp = getHealth();
+    target.tick();          // vieillit la cible à chaque tick
     receiveMessages();
-    sendLogMessage("[MainBot: " + myId + "] " + myX + "," + myY );
+    sendLogMessage("[Bot:" + myId + "] " + round2(myX) + "," + round2(myY)
+        + (target.valid ? " tgt=(" + round2(target.x) + "," + round2(target.y) + ") age=" + target.age : ""));
     onStep();
   }
 
   protected abstract void onStep();
 
+  // ------------------------------------------------------------------ //
+  //  Broadcast — inclut l'âge de la cible pour que les alliés filtrent
+  // ------------------------------------------------------------------ //
   protected void broadcastStatus() {
     String msg = myId + ":" + currentState
-      + "|x:" + round2(myX)
-      + "|y:" + round2(myY)
-      + "|tx:" + round2(targetX)
-      + "|ty:" + round2(targetY)
-      + "|hp:" + round2(myHp);
+        + "|x:" + round2(myX)
+        + "|y:" + round2(myY)
+        + "|tx:" + (target.valid ? round2(target.x) : "NaN")
+        + "|ty:" + (target.valid ? round2(target.y) : "NaN")
+        + "|hp:" + round2(myHp)
+        + "|ta:" + (target.valid ? target.age : 9999);
     broadcast(msg);
+  }
+
+  // ------------------------------------------------------------------ //
+  //  Fusion de cible inter-alliés : accepte la cible la plus fraîche
+  // ------------------------------------------------------------------ //
+  protected void mergeTeamTargets() {
+    for (BotMessage bm : teamMessages) {
+      if (Double.isNaN(bm.targetX()) || Double.isNaN(bm.targetY())) continue;
+      // On met à jour uniquement si la cible alliée est plus fraîche que la nôtre
+      if (!target.valid || bm.targetAge() < target.age) {
+        target.update(bm.targetX(), bm.targetY());
+        // On simule l'âge reçu (le message a voyagé 1 tick)
+        target.age = bm.targetAge() + 1;
+      }
+    }
   }
 
   private void receiveMessages() {
@@ -93,14 +147,15 @@ public abstract class NoeAbstractBot extends Brain {
     try {
       String[] sections = raw.split("\\|");
       String[] header = sections[0].split(":");
-      int senderId    = Integer.parseInt(header[0]);
-      int senderState = Integer.parseInt(header[1]);
+      int senderId = Integer.parseInt(header[0]);
+      State senderState = State.valueOf(header[1]);
 
-      if (senderId == myId) return null; // ignore ses propres messages
+      if (senderId == myId) return null;
 
       double x = Double.NaN, y = Double.NaN;
       double tx = Double.NaN, ty = Double.NaN;
       double hp = 1.0;
+      int ta = 9999;
 
       for (int i = 1; i < sections.length; i++) {
         String[] kv = sections[i].split(":");
@@ -108,24 +163,30 @@ public abstract class NoeAbstractBot extends Brain {
         switch (kv[0]) {
           case "x"  -> x  = Double.parseDouble(kv[1]);
           case "y"  -> y  = Double.parseDouble(kv[1]);
-          case "tx" -> tx = Double.parseDouble(kv[1]);
-          case "ty" -> ty = Double.parseDouble(kv[1]);
+          case "tx" -> tx = parseDoubleOrNaN(kv[1]);
+          case "ty" -> ty = parseDoubleOrNaN(kv[1]);
           case "hp" -> hp = Double.parseDouble(kv[1]);
+          case "ta" -> ta = Integer.parseInt(kv[1]);
         }
       }
-      return new BotMessage(senderId, senderState, x, y, tx, ty, hp);
+      return new BotMessage(senderId, senderState, x, y, tx, ty, hp, ta);
 
     } catch (Exception e) {
-      return null; // message malformé — ignoré
+      return null;
     }
   }
 
-  // ----------------------------------------------------------
+  private double parseDoubleOrNaN(String s) {
+    if ("NaN".equals(s)) return Double.NaN;
+    return Double.parseDouble(s);
+  }
+
+  // ------------------------------------------------------------------ //
 
   protected boolean isFrontEnemyDetected() {
     IFrontSensorResult.Types t = detectFront().getObjectType();
     return t == IFrontSensorResult.Types.OpponentMainBot
-      || t == IFrontSensorResult.Types.OpponentSecondaryBot;
+        || t == IFrontSensorResult.Types.OpponentSecondaryBot;
   }
 
   protected boolean isFrontWall() {
@@ -145,22 +206,31 @@ public abstract class NoeAbstractBot extends Brain {
         nearest = r;
       }
     }
+    if (nearest != null) {
+      double ex = myX + nearest.getObjectDistance() * Math.cos(nearest.getObjectDirection());
+      double ey = myY + nearest.getObjectDistance() * Math.sin(nearest.getObjectDirection()); // BUG FIX: sin
+      target.update(ex, ey);
+    }
     return nearest;
   }
 
   protected boolean isEnemy(IRadarResult r) {
     return r.getObjectType() == IRadarResult.Types.OpponentMainBot
-      || r.getObjectType() == IRadarResult.Types.OpponentSecondaryBot;
+        || r.getObjectType() == IRadarResult.Types.OpponentSecondaryBot;
   }
 
   protected boolean isSecondaryEnemy(IRadarResult r) {
     return r.getObjectType() == IRadarResult.Types.OpponentSecondaryBot;
   }
 
-  // ----------------------------------------------------------
+  protected boolean isDead() {
+    return getHealth() <= 0;
+  }
+
+  // ------------------------------------------------------------------ //
 
   protected double normalizeAngle(double angle) {
-    while (angle >  Math.PI) angle -= 2 * Math.PI;
+    while (angle > Math.PI)  angle -= 2 * Math.PI;
     while (angle < -Math.PI) angle += 2 * Math.PI;
     return angle;
   }
@@ -170,8 +240,7 @@ public abstract class NoeAbstractBot extends Brain {
   }
 
   protected double distanceTo(double x, double y) {
-    double dx = x - myX;
-    double dy = y - myY;
+    double dx = x - myX, dy = y - myY;
     return Math.sqrt(dx * dx + dy * dy);
   }
 
@@ -193,51 +262,32 @@ public abstract class NoeAbstractBot extends Brain {
     return diff < ANGLEPRECISION || Math.abs(diff - 2 * Math.PI) < ANGLEPRECISION;
   }
 
-  // alternate=false : même sens → arc/orbital   |   alternate=true : L/R → slalom/zigzag
   protected void startCurvedMove(int n, int k, Parameters.Direction dir, boolean alternate) {
-    curveN              = n;
-    curveK              = k;
-    curveTurnDir        = dir;
-    curveMoving         = true;
-    curveTick           = 0;
-    curveActive         = true;
+    curveN = n; curveK = k; curveTurnDir = dir;
+    curveMoving = true; curveTick = 0; curveActive = true;
     curveAlternateState = alternate;
   }
 
-  // Exécute un tick du mouvement courbé.
-  // Retourne true tant que le mouvement est actif, false si stopCurvedMove() a été appelé.
-  // À appeler une fois par step dans onStep() quand le bot est en mode déplacement courbé.
   protected boolean stepCurvedMove(double stepSize) {
     if (!curveActive) return false;
-
     if (curveMoving) {
       move();
       updatePosition(stepSize);
       curveTick++;
-      if (curveTick >= curveN) {
-        curveTick   = 0;
-        curveMoving = false; // bascule en phase rotation
-      }
+      if (curveTick >= curveN) { curveTick = 0; curveMoving = false; }
     } else {
       stepTurn(curveTurnDir);
       curveTick++;
       if (curveTick >= curveK) {
-        curveTick   = 0;
-        curveMoving = true; // bascule en phase avance
-        if (curveAlternateState) // inverse la direction pour slalom
+        curveTick = 0; curveMoving = true;
+        if (curveAlternateState)
           curveTurnDir = (curveTurnDir == Parameters.Direction.RIGHT)
-            ? Parameters.Direction.LEFT
-            : Parameters.Direction.RIGHT;
+              ? Parameters.Direction.LEFT : Parameters.Direction.RIGHT;
       }
     }
     return true;
   }
 
-  protected void stopCurvedMove() {
-    curveActive = false;
-  }
-
-  protected boolean isCurvedMoveActive() {
-    return curveActive;
-  }
+  protected void stopCurvedMove() { curveActive = false; }
+  protected boolean isCurvedMoveActive() { return curveActive; }
 }
