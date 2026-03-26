@@ -39,3 +39,5 @@ replay_pid*
 sources.txt
 *.bak
 benchmark_tmp/
+
+.metals
