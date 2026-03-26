@@ -5,16 +5,6 @@ import characteristics.Parameters;
 
 import static algorithms.lab.NoeAbstractBot.State.*;
 
-/**
- * Bot secondaire — Éclaireur.
- *
- * Rôle : grande portée radar 360°, rapide, ne tire pas.
- * Stratégie :
- *  • Slalom permanent pour couvrir le terrain.
- *  • Scan radar à chaque tick → remonte les positions ennemies aux Main via broadcast.
- *  • Intègre aussi les cibles des alliés (mergeTeamTargets) pour les relayer
- *    si un Main détecte quelque chose que l'autre Secondary ne voit pas encore.
- */
 public class NoeSecondaryBot extends NoeAbstractBot {
 
   private static final double STEP_SIZE     = Parameters.teamASecondaryBotSpeed;
@@ -52,16 +42,9 @@ public class NoeSecondaryBot extends NoeAbstractBot {
 
   @Override
   protected void onStep() {
-    // 1. Scan radar en priorité absolue — c'est le rôle principal du Secondary
     IRadarResult enemy = nearestEnemy(); // met à jour target si ennemi détecté
-
-    // 2. Fusionner avec les cibles alliées (au cas où un allié voit mieux)
     mergeTeamTargets();
-
-    // 3. Broadcast systématique (inclut la cible si elle existe et est fraîche)
     broadcastStatus();
-
-    // 4. Comportement de déplacement
     switch (currentState) {
       case MOVE_SLALOM  -> stateMoveSlalom();
       case MOVE_FORWARD -> stateMoveForward();
@@ -70,15 +53,6 @@ public class NoeSecondaryBot extends NoeAbstractBot {
     }
   }
 
-  // ------------------------------------------------------------------ //
-  //  États
-  // ------------------------------------------------------------------ //
-
-  /**
-   * Déplacement en slalom — couverture de terrain maximale.
-   * Le Secondary ne s'arrête jamais pour tirer, il reste en mouvement
-   * pour éclairer la zone et rester difficile à toucher.
-   */
   private void stateMoveSlalom() {
     stepCurvedMove(STEP_SIZE);
   }
@@ -90,7 +64,6 @@ public class NoeSecondaryBot extends NoeAbstractBot {
   }
 
   private void stateIdleWatch() {
-    // État de secours : retourne au slalom
     transitionTo(MOVE_SLALOM);
   }
 

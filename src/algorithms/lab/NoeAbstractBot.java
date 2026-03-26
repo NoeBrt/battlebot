@@ -9,18 +9,13 @@ import java.util.ArrayList;
 
 public abstract class NoeAbstractBot extends Brain {
 
-  // ------------------------------------------------------------------ //
   //  Format broadcast : "id:state|x:val|y:val|tx:val|ty:val|hp:val|ta:val"
   //  Champ "ta" (target age en ticks) ajouté pour la fraîcheur de cible.
-  // ------------------------------------------------------------------ //
   protected record BotMessage(int senderId, State senderState,
                               double x, double y,
                               double targetX, double targetY,
                               double hp, int targetAge) {}
 
-  // ------------------------------------------------------------------ //
-  //  Suivi de cible avec horodatage (en ticks simulés)
-  // ------------------------------------------------------------------ //
   protected static class TargetInfo {
     double x, y;
     int age;          // nombre de ticks depuis la dernière observation
@@ -34,7 +29,6 @@ public abstract class NoeAbstractBot extends Brain {
 
     void tick() { if (valid) age++; }
 
-    /** Une cible est considérée périmée après MAX_TARGET_AGE ticks sans confirmation. */
     boolean isStale(int maxAge) { return !valid || age > maxAge; }
   }
 
@@ -65,10 +59,8 @@ public abstract class NoeAbstractBot extends Brain {
   protected double myX = 0;
   protected double myY = 0;
 
-  // Remplace les anciens targetX/targetY/targetFound par un TargetInfo structuré
   protected final TargetInfo target = new TargetInfo();
 
-  /** Accesseurs de compatibilité (évite de casser les appels existants) */
   protected double targetX() { return target.x; }
   protected double targetY() { return target.y; }
   protected boolean targetFound() { return target.valid && !target.isStale(MAX_TARGET_AGE); }
@@ -106,9 +98,6 @@ public abstract class NoeAbstractBot extends Brain {
 
   protected abstract void onStep();
 
-  // ------------------------------------------------------------------ //
-  //  Broadcast — inclut l'âge de la cible pour que les alliés filtrent
-  // ------------------------------------------------------------------ //
   protected void broadcastStatus() {
     String msg = myId + ":" + currentState
         + "|x:" + round2(myX)
@@ -120,9 +109,6 @@ public abstract class NoeAbstractBot extends Brain {
     broadcast(msg);
   }
 
-  // ------------------------------------------------------------------ //
-  //  Fusion de cible inter-alliés : accepte la cible la plus fraîche
-  // ------------------------------------------------------------------ //
   protected void mergeTeamTargets() {
     for (BotMessage bm : teamMessages) {
       if (Double.isNaN(bm.targetX()) || Double.isNaN(bm.targetY())) continue;

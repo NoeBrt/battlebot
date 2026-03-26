@@ -50,13 +50,10 @@ public class NoeMainBot extends NoeAbstractBot {
   protected void onStep() {
     broadcastStatus();
 
-    // --- Mort : passer en mode radar passif ---
     if (isDead()) { transitionTo(RADAR_MODE); return; }
 
-    // --- Fusion des cibles alliées (Secondary en priorité car plus fraîches) ---
     mergeTeamTargets();
 
-    // --- Si une cible fraîche est connue et qu'on n'est pas encore en attaque ---
     if (targetFound() && currentState != ATTACK_MODE
         && currentState != FIRE
         && currentState != DODGE) {
@@ -76,10 +73,6 @@ public class NoeMainBot extends NoeAbstractBot {
     }
   }
 
-  // ------------------------------------------------------------------ //
-  //  États
-  // ------------------------------------------------------------------ //
-
   private void stateMoveForward() {
     IRadarResult enemy = nearestEnemy(); // met à jour target si trouvé
     if (enemy != null) {
@@ -92,32 +85,21 @@ public class NoeMainBot extends NoeAbstractBot {
     updatePosition(STEP_SIZE);
   }
 
-  /**
-   * Mode attaque : tire vers la cible connue et actualise via le radar.
-   * Si la cible est périmée (ennemi perdu), retour en patrouille.
-   */
   private void stateAttackMode() {
     if (myHp < LOW_HEALTH_RATIO) { transitionTo(DODGE); return; }
-
-    // Rafraîchissement radar propre
     IRadarResult radarEnemy = nearestEnemy();
     if (radarEnemy != null) lockedTarget = radarEnemy;
-
     if (!targetFound()) {
-      // Cible périmée : retour en patrouille
       sendLogMessage("[MainBot:" + id() + "] cible perdue → MOVE_FORWARD");
       transitionTo(MOVE_FORWARD);
       return;
     }
-
-    // Tir vers la position estimée
     double angle = angleTo(targetX(), targetY());
     fire(angle);
     transitionTo(REPOSITION); // bouge après chaque tir pour être imprévisible
   }
 
   private void stateRadarMode() {
-    // Bot "mort" : continue à scanner pour alimenter les alliés
     nearestEnemy();
     broadcastStatus();
   }
@@ -177,10 +159,6 @@ public class NoeMainBot extends NoeAbstractBot {
     updatePosition(-STEP_SIZE);
     dodgeSteps--;
   }
-
-  // ------------------------------------------------------------------ //
-  //  Utilitaires
-  // ------------------------------------------------------------------ //
 
   private void transitionTo(State newState) {
     sendLogMessage("[MainBot:" + id() + "] " + currentState + " → " + newState);
