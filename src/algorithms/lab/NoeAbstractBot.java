@@ -6,30 +6,54 @@ import characteristics.Parameters;
 import robotsimulator.Brain;
 
 import java.util.ArrayList;
+import java.util.List;
 
 public abstract class NoeAbstractBot extends Brain {
+
+  protected static class Position {
+    private double x;
+    private double y;
+
+    Position(double x, double y) {
+      this.x = x;
+      this.y = y;
+    }
+
+    public double getX() { return x; }
+    public double getY() { return y; }
+
+    public void setX(double x) { this.x = x; }
+    public void setY(double y) { this.y = y; }
+  }
 
   //  Format broadcast : "id:state|x:val|y:val|tx:val|ty:val|hp:val|ta:val"
   //  Champ "ta" (target age en ticks) ajouté pour la fraîcheur de cible.
   protected record BotMessage(int senderId, State senderState,
-                              double x, double y,
-                              double targetX, double targetY,
+                              Position myPos,
+                              Position targetPos,
                               double hp, int targetAge) {}
 
   protected static class TargetInfo {
-    double x, y;
+    Position pos;
     int age;          // nombre de ticks depuis la dernière observation
     boolean valid;
 
-    TargetInfo() { valid = false; age = Integer.MAX_VALUE; }
+    TargetInfo() {
+      pos = new Position(Double.NaN, Double.NaN);
+      valid = false;
+      age = Integer.MAX_VALUE;
+    }
 
     void update(double nx, double ny) {
-      x = nx; y = ny; age = 0; valid = true;
+      pos.setX(nx);
+      pos.setY(ny);
+      age = 0;
+      valid = true;
     }
 
     void tick() { if (valid) age++; }
 
-    boolean isStale(int maxAge) { return !valid || age > maxAge; }
+    boolean isStale() { return !valid || age > NoeAbstractBot.MAX_TARGET_AGE; }
   }
 
   protected static final int MAX_TARGET_AGE = 30; // ticks avant d'oublier la cible
@@ -61,9 +85,10 @@ public abstract class NoeAbstractBot extends Brain {
 
   protected final TargetInfo target = new TargetInfo();
 
-  protected double targetX() { return target.x; }
-  protected double targetY() { return target.y; }
-  protected boolean targetFound() { return target.valid && !target.isStale(MAX_TARGET_AGE); }
+  protected double targetX() { return target.pos.getX(); }
+  protected double targetY() { return target.pos.getY(); }
+  protected boolean targetFound() { return target.valid && !target.isStale(); }
+  protected List<Position> wreckedEnnemiesPos = new ArrayList<>();
 
   protected double myHp = 1.0;
   protected int myId;
@@ -92,7 +117,7 @@ public abstract class NoeAbstractBot extends Brain {
     target.tick();          // vieillit la cible à chaque tick
     receiveMessages();
     sendLogMessage("[Bot:" + myId + "] " + round2(myX) + "," + round2(myY)
-        + (target.valid ? " tgt=(" + round2(target.x) + "," + round2(target.y) + ") age=" + target.age : ""));
+        + (target.valid ? " tgt=(" + round2(target.pos.getX()) + "," + round2(target.pos.getY()) + ") age=" + target.age : ""));
     onStep();
   }
 
@@ -102,8 +127,8 @@ public abstract class NoeAbstractBot extends Brain {
     String msg = myId + ":" + currentState
         + "|x:" + round2(myX)
         + "|y:" + round2(myY)
-        + "|tx:" + (target.valid ? round2(target.x) : "NaN")
-        + "|ty:" + (target.valid ? round2(target.y) : "NaN")
+        + "|tx:" + (target.valid ? round2(target.pos.getX()) : "NaN")
+        + "|ty:" + (target.valid ? round2(target.pos.getY()) : "NaN")
         + "|hp:" + round2(myHp)
         + "|ta:" + (target.valid ? target.age : 9999);
     broadcast(msg);
@@ -111,14 +136,18 @@ public abstract class NoeAbstractBot extends Brain {
 
   protected void mergeTeamTargets() {
     for (BotMessage bm : teamMessages) {
-      if (Double.isNaN(bm.targetX()) || Double.isNaN(bm.targetY())) continue;
+      if (Double.isNaN(bm.targetPos().getX()) || Double.isNaN(bm.targetPos().getY())) continue;
       // On met à jour uniquement si la cible alliée est plus fraîche que la nôtre
       if (!target.valid || bm.targetAge() < target.age) {
-        target.update(bm.targetX(), bm.targetY());
+        target.update(bm.targetPos().getX(), bm.targetPos().getY());
         // On simule l'âge reçu (le message a voyagé 1 tick)
         target.age = bm.targetAge() + 1;
       }
     }
+  }
+
+  protected void addWreckedEnnemies() {
+
   }
 
   private void receiveMessages() {
@@ -155,7 +184,7 @@ public abstract class NoeAbstractBot extends Brain {
           case "ta" -> ta = Integer.parseInt(kv[1]);
         }
       }
-      return new BotMessage(senderId, senderState, x, y, tx, ty, hp, ta);
+      return new BotMessage(senderId, senderState, new Position(x, y), new Position(tx, ty), hp, ta);
 
     } catch (Exception e) {
       return null;
@@ -173,10 +202,6 @@ public abstract class NoeAbstractBot extends Brain {
     IFrontSensorResult.Types t = detectFront().getObjectType();
     return t == IFrontSensorResult.Types.OpponentMainBot
         || t == IFrontSensorResult.Types.OpponentSecondaryBot;
-  }
-
-  protected boolean isFrontWall() {
-    return detectFront().getObjectType() == IFrontSensorResult.Types.WALL;
   }
 
   protected boolean isFrontObstacle() {

@@ -29,7 +29,7 @@ public class NoeSecondaryBot extends NoeAbstractBot {
         y = isTeamA ? Parameters.teamASecondaryBot2InitY : Parameters.teamBSecondaryBot2InitY; }
     }
     if (myId == S1) {
-      startCurvedMove(10, 1, Parameters.Direction.LEFT, false);
+      startCurvedMove(3, 2, Parameters.Direction.LEFT, true);
       initState(MOVE_SLALOM, x, y);
     } else {
       initState(MOVE_FORWARD, x, y);
