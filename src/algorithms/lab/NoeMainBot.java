@@ -31,14 +31,20 @@ public class NoeMainBot extends NoeAbstractBot {
 
     double x = 0, y = 0;
     switch (myId) {
-      case M1 -> { x = isTeamA ? Parameters.teamAMainBot1InitX : Parameters.teamBMainBot1InitX;
-        y = isTeamA ? Parameters.teamAMainBot1InitY : Parameters.teamBMainBot1InitY; }
-      case M2 -> { x = isTeamA ? Parameters.teamAMainBot2InitX : Parameters.teamBMainBot2InitX;
-        y = isTeamA ? Parameters.teamAMainBot2InitY : Parameters.teamBMainBot2InitY; }
-      case M3 -> { x = isTeamA ? Parameters.teamAMainBot3InitX : Parameters.teamBMainBot3InitX;
-        y = isTeamA ? Parameters.teamAMainBot3InitY : Parameters.teamBMainBot3InitY; }
+      case M1 -> {
+        x = isTeamA ? Parameters.teamAMainBot1InitX : Parameters.teamBMainBot1InitX;
+        y = isTeamA ? Parameters.teamAMainBot1InitY : Parameters.teamBMainBot1InitY;
+      }
+      case M2 -> {
+        x = isTeamA ? Parameters.teamAMainBot2InitX : Parameters.teamBMainBot2InitX;
+        y = isTeamA ? Parameters.teamAMainBot2InitY : Parameters.teamBMainBot2InitY;
+      }
+      case M3 -> {
+        x = isTeamA ? Parameters.teamAMainBot3InitX : Parameters.teamBMainBot3InitX;
+        y = isTeamA ? Parameters.teamAMainBot3InitY : Parameters.teamBMainBot3InitY;
+      }
     }
-    startCurvedMove(16, 1, Parameters.Direction.LEFT, true);
+    //startCurvedMove(16, 1, Parameters.Direction.LEFT, true);
     initState(MOVE_FORWARD, x, y);
     sendLogMessage("[MainBot:" + id() + "] spawn=(" + myX + "," + myY + ")");
   }
@@ -49,18 +55,17 @@ public class NoeMainBot extends NoeAbstractBot {
   @Override
   protected void onStep() {
     broadcastStatus();
-
     if (isDead()) { transitionTo(RADAR_MODE); return; }
-
     mergeTeamTargets();
-
-    if (targetFound() && currentState != ATTACK_MODE
-        && currentState != FIRE
-        && currentState != DODGE) {
+    if (allyFoundATargetWhileBeingFree()) {
       transitionTo(ATTACK_MODE);
       return;
     }
-
+    scanAround();
+    if (isInDeadZone(myX, myY) && currentState != AVOID_DEAD_ZONE) {
+      transitionTo(AVOID_DEAD_ZONE);
+      return;
+    }
     switch (currentState) {
       case MOVE_FORWARD -> stateMoveForward();
       case IDLE_WATCH   -> stateIdleWatch();
@@ -70,44 +75,60 @@ public class NoeMainBot extends NoeAbstractBot {
       case DODGE        -> stateDodge();
       case MOVE_SLALOM  -> stateMoveSlalom();
       case RADAR_MODE   -> stateRadarMode();
+      case AVOID_OBSTACLE -> stateAvoidObstacle();
+      case AVOID_DEAD_ZONE -> stateAvoidDeadZone();
     }
   }
 
   private void stateMoveForward() {
-    IRadarResult enemy = nearestEnemy(); // met à jour target si trouvé
-    if (enemy != null) {
-      lockedTarget = enemy;
+    if (nearestEnemy != null || targetFound()) {
+      lockedTarget = nearestEnemy;
       transitionTo(ATTACK_MODE);
       return;
     }
-    if (isFrontObstacle()) { transitionTo(REPOSITION); return; }
+    if (isFrontObstacle()) {
+      transitionTo(AVOID_OBSTACLE);
+      return;
+    }
     move();
     updatePosition(STEP_SIZE);
   }
 
+  private void stateAvoidDeadZone() {
+    if (!isInDeadZone(myX, myY)) {
+      transitionTo(previousState); // retour à l'état d'avant
+      return;
+    }
+    double escapeAngle = safeAngle(getHeading(), STEP_SIZE);
+    if (!isAligned(escapeAngle, AIM_THRESHOLD * 2)) turnToward(escapeAngle);
+    else { move(); updatePosition(STEP_SIZE); }
+  }
+
   private void stateAttackMode() {
-    if (myHp < LOW_HEALTH_RATIO) { transitionTo(DODGE); return; }
-    IRadarResult radarEnemy = nearestEnemy();
-    if (radarEnemy != null) lockedTarget = radarEnemy;
     if (!targetFound()) {
+      lockedTarget = null;
+      target.valid = false;
       sendLogMessage("[MainBot:" + id() + "] cible perdue → MOVE_FORWARD");
       transitionTo(MOVE_FORWARD);
       return;
     }
+    double dist = distanceTo(targetX(), targetY());
     double angle = angleTo(targetX(), targetY());
+    if (dist > FIRE_RANGE) {
+      if (!isAligned(angle, AIM_THRESHOLD * 2)) turnToward(angle);
+      else { move(); updatePosition(STEP_SIZE); }
+      return;
+    }
     fire(angle);
-    transitionTo(REPOSITION); // bouge après chaque tir pour être imprévisible
+    //transitionTo(REPOSITION); // bouge après chaque tir pour être imprévisible
   }
 
   private void stateRadarMode() {
-    nearestEnemy();
-    broadcastStatus();
   }
 
   private void stateMoveSlalom() {
-    IRadarResult enemy = nearestEnemy();
-    if (enemy != null) {
-      lockedTarget = enemy;
+    if (nearestEnemy != null) {
+      lockedTarget = nearestEnemy;
       stopCurvedMove();
       transitionTo(ATTACK_MODE);
       return;
@@ -116,14 +137,10 @@ public class NoeMainBot extends NoeAbstractBot {
   }
 
   private void stateIdleWatch() {
-    if (myHp < LOW_HEALTH_RATIO) { transitionTo(DODGE); return; }
-    IRadarResult enemy = nearestEnemy();
-    if (enemy != null) {
-      lockedTarget = enemy;
+    if (nearestEnemy != null) {
+      lockedTarget = nearestEnemy;
       transitionTo(ATTACK_MODE);
     }
-    // Si une cible fraîche vient des alliés, targetFound() sera true
-    // et le bloc en tête de onStep() aura déjà déclenché ATTACK_MODE.
   }
 
   private void stateFire() {
@@ -160,6 +177,16 @@ public class NoeMainBot extends NoeAbstractBot {
     dodgeSteps--;
   }
 
+  private void stateAvoidObstacle() {
+    double targetAngle = normalizeAngle(getHeading() + Parameters.RIGHTTURNFULLANGLE);
+    if (!isAligned(targetAngle, AIM_THRESHOLD * 2)) {
+      turnToward(targetAngle);
+    }
+    if (!isFrontObstacle()) {
+      transitionTo(MOVE_FORWARD);
+    }
+  }
+
   private void transitionTo(State newState) {
     sendLogMessage("[MainBot:" + id() + "] " + currentState + " → " + newState);
     if (newState == DODGE) dodgeSteps = 5;
@@ -168,6 +195,7 @@ public class NoeMainBot extends NoeAbstractBot {
       repositionDir = (Math.random() < 0.5)
           ? Parameters.Direction.LEFT : Parameters.Direction.RIGHT;
     }
+    if (newState != AVOID_DEAD_ZONE) previousState = currentState;
     currentState = newState;
   }
 
@@ -181,6 +209,13 @@ public class NoeMainBot extends NoeAbstractBot {
   private void turnToward(double targetAngle) {
     double diff = normalizeAngle(targetAngle - getHeading());
     stepTurn(diff > 0 ? Parameters.Direction.RIGHT : Parameters.Direction.LEFT);
+  }
+
+  private boolean allyFoundATargetWhileBeingFree() {
+    return targetFound() && currentState != ATTACK_MODE
+      && currentState != FIRE
+      && currentState != DODGE
+      && currentState != AVOID_DEAD_ZONE;
   }
 
   private String id() {

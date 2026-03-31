@@ -1,4 +1,4 @@
-package algorithms;
+package algorithms.external;
 
 public class YomiSecondary extends YomiMain {
     public YomiSecondary() {

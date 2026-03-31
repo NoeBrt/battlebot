@@ -42,9 +42,10 @@ public class NoeSecondaryBot extends NoeAbstractBot {
 
   @Override
   protected void onStep() {
-    IRadarResult enemy = nearestEnemy(); // met à jour target si ennemi détecté
+    scanAround();
     mergeTeamTargets();
     broadcastStatus();
+    if (isDead()) transitionTo(IDLE_WATCH);
     switch (currentState) {
       case MOVE_SLALOM  -> stateMoveSlalom();
       case MOVE_FORWARD -> stateMoveForward();
@@ -64,7 +65,7 @@ public class NoeSecondaryBot extends NoeAbstractBot {
   }
 
   private void stateIdleWatch() {
-    transitionTo(MOVE_SLALOM);
+
   }
 
   private void transitionTo(State newState) {

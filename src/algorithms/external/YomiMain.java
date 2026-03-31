@@ -4,7 +4,7 @@
  * GPL version>=3 <http://www.gnu.org/licenses/>.
  * $Id: algorithms/Main.java 2014-10-19 buixuan.
  * ******************************************************/
-package algorithms;
+package algorithms.external;
 
 import characteristics.IFrontSensorResult;
 import characteristics.IRadarResult;

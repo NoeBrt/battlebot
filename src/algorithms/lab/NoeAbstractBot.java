@@ -6,17 +6,24 @@ import characteristics.Parameters;
 import robotsimulator.Brain;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 public abstract class NoeAbstractBot extends Brain {
 
   protected static class Position {
+    private static final double EPSILON = 1e-6;
     private double x;
     private double y;
 
     Position(double x, double y) {
       this.x = x;
       this.y = y;
+    }
+
+    public boolean isClose(Position p) {
+      return Math.abs(x - p.x) < EPSILON &&
+        Math.abs(y - p.y) < EPSILON;
     }
 
     public double getX() { return x; }
@@ -66,7 +73,9 @@ public abstract class NoeAbstractBot extends Brain {
     DODGE,
     ATTACK_MODE,
     MOVE_SLALOM,
-    RADAR_MODE
+    RADAR_MODE,
+    AVOID_OBSTACLE,
+    AVOID_DEAD_ZONE
   }
 
   protected static final int M1 = 0;
@@ -77,6 +86,7 @@ public abstract class NoeAbstractBot extends Brain {
 
   protected static final double ANGLEPRECISION = 0.001;
   protected static final double SECONDARY_RADAR_RANGE = Parameters.teamASecondaryBotFrontalDetectionRange;
+  protected static final double FIRE_RANGE = Parameters.bulletRange;
 
   protected final ArrayList<BotMessage> teamMessages = new ArrayList<>();
 
@@ -88,10 +98,12 @@ public abstract class NoeAbstractBot extends Brain {
   protected double targetX() { return target.pos.getX(); }
   protected double targetY() { return target.pos.getY(); }
   protected boolean targetFound() { return target.valid && !target.isStale(); }
-  protected List<Position> wreckedEnnemiesPos = new ArrayList<>();
+  protected List<Position> wreckedEnemiesPos = new ArrayList<>();
+  protected IRadarResult nearestEnemy = null;
 
   protected double myHp = 1.0;
   protected int myId;
+  protected State previousState;
   protected State currentState;
   protected boolean isTeamA;
 
@@ -146,8 +158,15 @@ public abstract class NoeAbstractBot extends Brain {
     }
   }
 
-  protected void addWreckedEnnemies() {
-
+  private void addWreckedEnnemies(IRadarResult enemy) {
+    double ex = myX + enemy.getObjectDistance() * Math.cos(enemy.getObjectDirection());
+    double ey = myY + enemy.getObjectDistance() * Math.sin(enemy.getObjectDirection());
+    Position newPos = new Position(ex, ey);
+    boolean alreadyKnown = wreckedEnemiesPos.stream()
+      .anyMatch(p -> p.isClose(newPos));
+    if (!alreadyKnown) {
+      wreckedEnemiesPos.add(newPos);
+    }
   }
 
   private void receiveMessages() {
@@ -198,36 +217,37 @@ public abstract class NoeAbstractBot extends Brain {
 
   // ------------------------------------------------------------------ //
 
-  protected boolean isFrontEnemyDetected() {
-    IFrontSensorResult.Types t = detectFront().getObjectType();
-    return t == IFrontSensorResult.Types.OpponentMainBot
-        || t == IFrontSensorResult.Types.OpponentSecondaryBot;
-  }
-
   protected boolean isFrontObstacle() {
     return !(detectFront().getObjectType() == IFrontSensorResult.Types.NOTHING);
   }
 
-  protected IRadarResult nearestEnemy() {
-    IRadarResult nearest = null;
-    double minDist = Double.MAX_VALUE;
+  protected void scanAround() {
+    double minDist = SECONDARY_RADAR_RANGE;
+    nearestEnemy = null;
+
     for (IRadarResult r : detectRadar()) {
+      if (isWreckedEnemy(r)) addWreckedEnnemies(r);
+
       if (isEnemy(r) && r.getObjectDistance() < minDist) {
         minDist = r.getObjectDistance();
-        nearest = r;
+        nearestEnemy = r;
       }
     }
-    if (nearest != null) {
-      double ex = myX + nearest.getObjectDistance() * Math.cos(nearest.getObjectDirection());
-      double ey = myY + nearest.getObjectDistance() * Math.sin(nearest.getObjectDirection()); // BUG FIX: sin
+
+    if (nearestEnemy != null) {
+      double ex = myX + nearestEnemy.getObjectDistance() * Math.cos(nearestEnemy.getObjectDirection());
+      double ey = myY + nearestEnemy.getObjectDistance() * Math.sin(nearestEnemy.getObjectDirection());
       target.update(ex, ey);
     }
-    return nearest;
   }
 
   protected boolean isEnemy(IRadarResult r) {
     return r.getObjectType() == IRadarResult.Types.OpponentMainBot
         || r.getObjectType() == IRadarResult.Types.OpponentSecondaryBot;
+  }
+
+  private boolean isWreckedEnemy(IRadarResult r) {
+    return r.getObjectType() == IRadarResult.Types.Wreck;
   }
 
   protected boolean isSecondaryEnemy(IRadarResult r) {
@@ -236,6 +256,51 @@ public abstract class NoeAbstractBot extends Brain {
 
   protected boolean isDead() {
     return getHealth() <= 0;
+  }
+
+  protected boolean isInDeadZone(double x, double y) {
+    for (Position wreck : wreckedEnemiesPos) {
+      double dx = x - wreck.getX();
+      double dy = y - wreck.getY();
+      if (dx * dx + dy * dy < SECONDARY_RADAR_RANGE * SECONDARY_RADAR_RANGE) return true;
+    }
+    return false;
+  }
+
+  protected double safeAngle(double intendedAngle, double stepSize) {
+    if (isInDeadZone(myX, myY)) {
+      // On est déjà dedans → calculer la direction vers la sortie la plus proche
+      Position nearest = wreckedEnemiesPos.stream()
+        .filter(w -> {
+          double dx = myX - w.getX(), dy = myY - w.getY();
+          return dx * dx + dy * dy < SECONDARY_RADAR_RANGE * SECONDARY_RADAR_RANGE;
+        })
+        .min(Comparator.comparingDouble(w -> {
+          double dx = myX - w.getX(), dy = myY - w.getY();
+          return dx * dx + dy * dy;
+        }))
+        .orElse(null);
+
+      if (nearest != null) {
+        // Angle qui s'éloigne de l'épave
+        return normalizeAngle(Math.atan2(myY - nearest.getY(), myX - nearest.getX()));
+      }
+    }
+    // On est dehors → vérifier que le prochain pas ne rentre pas
+    double nextX = myX + stepSize * Math.cos(intendedAngle);
+    double nextY = myY + stepSize * Math.sin(intendedAngle);
+    if (!isInDeadZone(nextX, nextY)) return intendedAngle; // aucun problème
+    // Le prochain pas entre dans une zone → chercher angle libre le plus proche
+    for (int i = 1; i <= 18; i++) {
+      double offset = i * (Math.PI / 18);
+      for (double sign : new double[]{1, -1}) {
+        double candidate = normalizeAngle(intendedAngle + sign * offset);
+        double cx = myX + stepSize * Math.cos(candidate);
+        double cy = myY + stepSize * Math.sin(candidate);
+        if (!isInDeadZone(cx, cy)) return candidate;
+      }
+    }
+    return normalizeAngle(intendedAngle + Math.PI);
   }
 
   // ------------------------------------------------------------------ //
