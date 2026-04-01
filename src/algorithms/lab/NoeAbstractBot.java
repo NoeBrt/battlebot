@@ -1,20 +1,17 @@
 package algorithms.lab;
 
-import characteristics.IRadarResult;
 import characteristics.IFrontSensorResult;
+import characteristics.IRadarResult;
 import characteristics.Parameters;
 import robotsimulator.Brain;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
+import java.util.*;
 
 public abstract class NoeAbstractBot extends Brain {
 
   protected static class Position {
     private static final double EPSILON = 1e-6;
-    private double x;
-    private double y;
+    private double x, y;
 
     Position(double x, double y) {
       this.x = x;
@@ -22,103 +19,105 @@ public abstract class NoeAbstractBot extends Brain {
     }
 
     public boolean isClose(Position p) {
-      return Math.abs(x - p.x) < EPSILON &&
-        Math.abs(y - p.y) < EPSILON;
+      return Math.abs(x - p.x) < EPSILON && Math.abs(y - p.y) < EPSILON;
     }
 
-    public double getX() { return x; }
-    public double getY() { return y; }
+    public double getX() {
+      return x;
+    }
 
-    public void setX(double x) { this.x = x; }
-    public void setY(double y) { this.y = y; }
+    public double getY() {
+      return y;
+    }
+
+    public void setX(double x) {
+      this.x = x;
+    }
+
+    public void setY(double y) {
+      this.y = y;
+    }
   }
 
-  //  Format broadcast : "id:state|x:val|y:val|tx:val|ty:val|hp:val|ta:val"
-  //  Champ "ta" (target age en ticks) ajouté pour la fraîcheur de cible.
-  protected record BotMessage(int senderId, State senderState,
+  protected record BotMessage(int senderId,
                               Position myPos,
                               Position targetPos,
-                              double hp, int targetAge) {}
+                              double hp,
+                              int targetAge,
+                              boolean targetIsSecondary) {
+  }
 
   protected static class TargetInfo {
     Position pos;
-    int age;          // nombre de ticks depuis la dernière observation
+    Position prevPos;
+    int age;
     boolean valid;
+    boolean isSecondary;
 
     TargetInfo() {
-      pos = new Position(Double.NaN, Double.NaN);
-      valid = false;
-      age = Integer.MAX_VALUE;
+      pos     = new Position(Double.NaN, Double.NaN);
+      prevPos = new Position(Double.NaN, Double.NaN);
+      valid   = false;
+      age     = Integer.MAX_VALUE;
+      isSecondary = false;
     }
 
-    void update(double nx, double ny) {
-      pos.setX(nx);
-      pos.setY(ny);
-      age = 0;
-      valid = true;
+    void update(double nx, double ny, boolean secondary) {
+      if (valid) { prevPos.setX(pos.getX()); prevPos.setY(pos.getY()); }
+      else       { prevPos.setX(nx);         prevPos.setY(ny); }
+      pos.setX(nx); pos.setY(ny);
+      age = 0; valid = true;
+      isSecondary = secondary;
     }
+
+    void update(double nx, double ny) { update(nx, ny, false); }
+
+    /** Vélocité estimée (pixels/tick). Zéro si première observation. */
+    double velocityX() { return pos.getX() - prevPos.getX(); }
+    double velocityY() { return pos.getY() - prevPos.getY(); }
 
     void tick() { if (valid) age++; }
-
-    boolean isStale() { return !valid || age > NoeAbstractBot.MAX_TARGET_AGE; }
+    boolean isStale() { return !valid || age > MAX_TARGET_AGE; }
   }
 
-  protected static final int MAX_TARGET_AGE = 30; // ticks avant d'oublier la cible
+  public enum BotAction {
+    DODGE(0),
+    FIRE(1),
+    TURN_LEFT(2), TURN_RIGHT(2),
+    MOVE_FWD(3), MOVE_BACK(3);
 
-  protected enum State {
-    MOVE_FORWARD,
-    IDLE_WATCH,
-    FIRE,
-    REPOSITION,
-    DODGE,
-    ATTACK_MODE,
-    MOVE_SLALOM,
-    RADAR_MODE,
-    AVOID_OBSTACLE,
-    AVOID_DEAD_ZONE
+    public final int priority;
+
+    BotAction(int p) {
+      this.priority = p;
+    }
   }
 
-  protected static final int M1 = 0;
-  protected static final int M2 = 1;
-  protected static final int M3 = 2;
-  protected static final int S1 = 3;
-  protected static final int S2 = 4;
-
+  protected static final int MAX_TARGET_AGE = 30;
+  protected static final int M1 = 0, M2 = 1, M3 = 2, S1 = 3, S2 = 4;
   protected static final double ANGLEPRECISION = 0.001;
-  protected static final double SECONDARY_RADAR_RANGE = Parameters.teamASecondaryBotFrontalDetectionRange;
+  protected static final double SECONDARY_RADAR_RANGE =
+    Parameters.teamASecondaryBotFrontalDetectionRange;
   protected static final double FIRE_RANGE = Parameters.bulletRange;
+  protected static final double STEP_TURN = 0.01 * Math.PI;
+  protected static final double BULLET_VELOCITY = Parameters.bulletVelocity;
+
+
+  protected final PriorityQueue<BotAction> actionQueue =
+    new PriorityQueue<>(Comparator.comparingInt(a -> a.priority));
 
   protected final ArrayList<BotMessage> teamMessages = new ArrayList<>();
+  protected final List<Position> wreckedEnemiesPos = new ArrayList<>();
 
-  protected double myX = 0;
-  protected double myY = 0;
-
+  protected double myX = 0, myY = 0;
+  protected double targetAngle;
   protected final TargetInfo target = new TargetInfo();
-
-  protected double targetX() { return target.pos.getX(); }
-  protected double targetY() { return target.pos.getY(); }
-  protected boolean targetFound() { return target.valid && !target.isStale(); }
-  protected List<Position> wreckedEnemiesPos = new ArrayList<>();
   protected IRadarResult nearestEnemy = null;
-
   protected double myHp = 1.0;
   protected int myId;
-  protected State previousState;
-  protected State currentState;
   protected boolean isTeamA;
 
-  protected int curveN;
-  protected int curveK;
-  protected int curveTick = 0;
-  protected boolean curveMoving;
-  protected boolean curveAlternateState = false;
-  protected boolean curveActive = false;
-  protected Parameters.Direction curveTurnDir;
-
-  // ------------------------------------------------------------------ //
-
-  protected void initState(State initialState, double startX, double startY) {
-    currentState = initialState;
+  protected void initState(double startX, double startY) {
     myX = startX;
     myY = startY;
     myHp = getHealth();
@@ -126,99 +125,106 @@ public abstract class NoeAbstractBot extends Brain {
 
   protected void stepState() {
     myHp = getHealth();
-    target.tick();          // vieillit la cible à chaque tick
+    target.tick();
     receiveMessages();
-    sendLogMessage("[Bot:" + myId + "] " + round2(myX) + "," + round2(myY)
-        + (target.valid ? " tgt=(" + round2(target.pos.getX()) + "," + round2(target.pos.getY()) + ") age=" + target.age : ""));
+    sendLogMessage("[Bot:" + myId + "] "
+      + round2(myX) + "," + round2(myY)
+      + (target.valid
+      ? " tgt=(" + round2(target.pos.getX()) + "," + round2(target.pos.getY())
+      + ") age=" + target.age
+      : ""));
     onStep();
   }
 
   protected abstract void onStep();
 
   protected void broadcastStatus() {
-    String msg = myId + ":" + currentState
-        + "|x:" + round2(myX)
-        + "|y:" + round2(myY)
-        + "|tx:" + (target.valid ? round2(target.pos.getX()) : "NaN")
-        + "|ty:" + (target.valid ? round2(target.pos.getY()) : "NaN")
-        + "|hp:" + round2(myHp)
-        + "|ta:" + (target.valid ? target.age : 9999);
+    String msg = myId
+      + "|x:" + round2(myX)
+      + "|y:" + round2(myY)
+      + "|tx:" + (target.valid ? round2(target.pos.getX()) : "NaN")
+      + "|ty:" + (target.valid ? round2(target.pos.getY()) : "NaN")
+      + "|hp:" + round2(myHp)
+      + "|ta:" + (target.valid ? target.age : 9999)
+      + "|sec:" + (target.valid && target.isSecondary ? 1 : 0);
     broadcast(msg);
   }
 
   protected void mergeTeamTargets() {
     for (BotMessage bm : teamMessages) {
-      if (Double.isNaN(bm.targetPos().getX()) || Double.isNaN(bm.targetPos().getY())) continue;
-      // On met à jour uniquement si la cible alliée est plus fraîche que la nôtre
-      if (!target.valid || bm.targetAge() < target.age) {
-        target.update(bm.targetPos().getX(), bm.targetPos().getY());
-        // On simule l'âge reçu (le message a voyagé 1 tick)
+      if (Double.isNaN(bm.targetPos().getX())) continue;
+
+      boolean incomingIsSecondary = bm.targetIsSecondary();
+      boolean fresher = bm.targetAge() < target.age;
+
+      // Priorité : secondary ennemi > main ennemi, mais un main reporté
+      // par n'importe quel allié reste valide
+      boolean shouldAdopt =
+        // On reçoit un secondary et on ne vise pas déjà un secondary
+        (incomingIsSecondary && !target.isSecondary)
+          // Ou notre cible est stale et l'info est plus fraîche
+          || (target.isStale() && fresher)
+          // Ou même type mais info plus fraîche
+          || (!incomingIsSecondary && !target.isSecondary && fresher);
+
+      if (shouldAdopt) {
+        target.update(bm.targetPos().getX(), bm.targetPos().getY(), incomingIsSecondary);
         target.age = bm.targetAge() + 1;
       }
     }
   }
 
-  private void addWreckedEnnemies(IRadarResult enemy) {
-    double ex = myX + enemy.getObjectDistance() * Math.cos(enemy.getObjectDirection());
-    double ey = myY + enemy.getObjectDistance() * Math.sin(enemy.getObjectDirection());
-    Position newPos = new Position(ex, ey);
-    boolean alreadyKnown = wreckedEnemiesPos.stream()
-      .anyMatch(p -> p.isClose(newPos));
-    if (!alreadyKnown) {
-      wreckedEnemiesPos.add(newPos);
-    }
+  /**
+   * Vide toutes les actions moins urgentes que le seuil (priority > threshold).
+   */
+  protected void flushBelow(int threshold) {
+    actionQueue.removeIf(a -> a.priority > threshold);
   }
 
-  private void receiveMessages() {
-    teamMessages.clear();
-    for (String raw : fetchAllMessages()) {
-      BotMessage msg = parseMessage(raw);
-      if (msg != null) teamMessages.add(msg);
-    }
+  /**
+   * Vide toute la queue.
+   */
+  protected void flushAll() {
+    actionQueue.clear();
   }
 
-  private BotMessage parseMessage(String raw) {
-    try {
-      String[] sections = raw.split("\\|");
-      String[] header = sections[0].split(":");
-      int senderId = Integer.parseInt(header[0]);
-      State senderState = State.valueOf(header[1]);
+  protected void enqueue(BotAction... actions) {
+    for (BotAction a : actions) actionQueue.add(a);
+  }
 
-      if (senderId == myId) return null;
+  protected boolean executeNext() {
+    if (actionQueue.isEmpty()) return false;
+    dispatch(actionQueue.poll());
+    return true;
+  }
 
-      double x = Double.NaN, y = Double.NaN;
-      double tx = Double.NaN, ty = Double.NaN;
-      double hp = 1.0;
-      int ta = 9999;
-
-      for (int i = 1; i < sections.length; i++) {
-        String[] kv = sections[i].split(":");
-        if (kv.length < 2) continue;
-        switch (kv[0]) {
-          case "x"  -> x  = Double.parseDouble(kv[1]);
-          case "y"  -> y  = Double.parseDouble(kv[1]);
-          case "tx" -> tx = parseDoubleOrNaN(kv[1]);
-          case "ty" -> ty = parseDoubleOrNaN(kv[1]);
-          case "hp" -> hp = Double.parseDouble(kv[1]);
-          case "ta" -> ta = Integer.parseInt(kv[1]);
-        }
+  /**
+   * À surcharger si un bot a des actions spécifiques supplémentaires.
+   */
+  protected void dispatch(BotAction action) {
+    switch (action) {
+      case TURN_LEFT -> stepTurn(Parameters.Direction.LEFT);
+      case TURN_RIGHT -> stepTurn(Parameters.Direction.RIGHT);
+      case MOVE_FWD -> {
+        move();
+        updatePosition(Parameters.teamAMainBotSpeed);
       }
-      return new BotMessage(senderId, senderState, new Position(x, y), new Position(tx, ty), hp, ta);
-
-    } catch (Exception e) {
-      return null;
+      case MOVE_BACK, DODGE -> {
+        moveBack();
+        updatePosition(-Parameters.teamAMainBotSpeed);
+      }
+      case FIRE -> {
+        if (targetFound()) fire(angleTo(target.pos.getX(), target.pos.getY()));
+      }
     }
   }
-
-  private double parseDoubleOrNaN(String s) {
-    if ("NaN".equals(s)) return Double.NaN;
-    return Double.parseDouble(s);
-  }
-
-  // ------------------------------------------------------------------ //
 
   protected boolean isFrontObstacle() {
-    return !(detectFront().getObjectType() == IFrontSensorResult.Types.NOTHING);
+    return detectFront().getObjectType() != IFrontSensorResult.Types.NOTHING;
+  }
+
+  protected boolean isFrontWall() {
+    return detectFront().getObjectType() == IFrontSensorResult.Types.WALL;
   }
 
   protected void scanAround() {
@@ -226,8 +232,7 @@ public abstract class NoeAbstractBot extends Brain {
     nearestEnemy = null;
 
     for (IRadarResult r : detectRadar()) {
-      if (isWreckedEnemy(r)) addWreckedEnnemies(r);
-
+      if (isWreckedEnemy(r)) addWreckedEnemy(r);
       if (isEnemy(r) && r.getObjectDistance() < minDist) {
         minDist = r.getObjectDistance();
         nearestEnemy = r;
@@ -237,21 +242,71 @@ public abstract class NoeAbstractBot extends Brain {
     if (nearestEnemy != null) {
       double ex = myX + nearestEnemy.getObjectDistance() * Math.cos(nearestEnemy.getObjectDirection());
       double ey = myY + nearestEnemy.getObjectDistance() * Math.sin(nearestEnemy.getObjectDirection());
+      boolean isSecondary = isSecondaryEnemy(nearestEnemy);
+      /*if (isSecondary && !target.isSecondary || target.isStale()) {
+        target.update(ex, ey, isSecondary);
+      }*/
       target.update(ex, ey);
     }
   }
 
-  protected boolean isEnemy(IRadarResult r) {
-    return r.getObjectType() == IRadarResult.Types.OpponentMainBot
-        || r.getObjectType() == IRadarResult.Types.OpponentSecondaryBot;
+  protected void predictiveFire() {
+    if (!targetFound()) return;
+
+    double dx = target.pos.getX() - myX;
+    double dy = target.pos.getY() - myY;
+    double vx = target.velocityX();
+    double vy = target.velocityY();
+    double Vb = BULLET_VELOCITY;
+
+    double a = vx*vx + vy*vy - Vb*Vb;
+    double b = 2 * (dx*vx + dy*vy);
+    double c = dx*dx + dy*dy;
+
+    double aimAngle;
+
+    if (Math.abs(a) < 1e-6) {
+      aimAngle = angleTo(target.pos.getX(), target.pos.getY());
+    } else {
+      double discriminant = b*b - 4*a*c;
+
+      if (discriminant < 0) {
+        aimAngle = angleTo(target.pos.getX(), target.pos.getY());
+      } else {
+        double sqrtD = Math.sqrt(discriminant);
+        double t1 = (-b - sqrtD) / (2*a);
+        double t2 = (-b + sqrtD) / (2*a);
+
+        double t = -1;
+        if (t1 > 0 && t2 > 0) t = Math.min(t1, t2);
+        else if (t1 > 0)       t = t1;
+        else if (t2 > 0)       t = t2;
+
+        if (t < 0) {
+          aimAngle = angleTo(target.pos.getX(), target.pos.getY());
+        } else {
+          // Point d'impact prédit
+          double impactX = target.pos.getX() + vx * t;
+          double impactY = target.pos.getY() + vy * t;
+          aimAngle = Math.atan2(impactY - myY, impactX - myX);
+        }
+      }
+    }
+
+    fire(normalizeAngle(aimAngle));
   }
 
-  private boolean isWreckedEnemy(IRadarResult r) {
-    return r.getObjectType() == IRadarResult.Types.Wreck;
+  protected boolean isEnemy(IRadarResult r) {
+    return r.getObjectType() == IRadarResult.Types.OpponentMainBot
+      || r.getObjectType() == IRadarResult.Types.OpponentSecondaryBot;
   }
 
   protected boolean isSecondaryEnemy(IRadarResult r) {
     return r.getObjectType() == IRadarResult.Types.OpponentSecondaryBot;
+  }
+
+  private boolean isWreckedEnemy(IRadarResult r) {
+    return r.getObjectType() == IRadarResult.Types.Wreck;
   }
 
   protected boolean isDead() {
@@ -259,9 +314,8 @@ public abstract class NoeAbstractBot extends Brain {
   }
 
   protected boolean isInDeadZone(double x, double y) {
-    for (Position wreck : wreckedEnemiesPos) {
-      double dx = x - wreck.getX();
-      double dy = y - wreck.getY();
+    for (Position w : wreckedEnemiesPos) {
+      double dx = x - w.getX(), dy = y - w.getY();
       if (dx * dx + dy * dy < SECONDARY_RADAR_RANGE * SECONDARY_RADAR_RANGE) return true;
     }
     return false;
@@ -269,7 +323,6 @@ public abstract class NoeAbstractBot extends Brain {
 
   protected double safeAngle(double intendedAngle, double stepSize) {
     if (isInDeadZone(myX, myY)) {
-      // On est déjà dedans → calculer la direction vers la sortie la plus proche
       Position nearest = wreckedEnemiesPos.stream()
         .filter(w -> {
           double dx = myX - w.getX(), dy = myY - w.getY();
@@ -280,17 +333,13 @@ public abstract class NoeAbstractBot extends Brain {
           return dx * dx + dy * dy;
         }))
         .orElse(null);
-
-      if (nearest != null) {
-        // Angle qui s'éloigne de l'épave
+      if (nearest != null)
         return normalizeAngle(Math.atan2(myY - nearest.getY(), myX - nearest.getX()));
-      }
     }
-    // On est dehors → vérifier que le prochain pas ne rentre pas
     double nextX = myX + stepSize * Math.cos(intendedAngle);
     double nextY = myY + stepSize * Math.sin(intendedAngle);
-    if (!isInDeadZone(nextX, nextY)) return intendedAngle; // aucun problème
-    // Le prochain pas entre dans une zone → chercher angle libre le plus proche
+    if (!isInDeadZone(nextX, nextY)) return intendedAngle;
+
     for (int i = 1; i <= 18; i++) {
       double offset = i * (Math.PI / 18);
       for (double sign : new double[]{1, -1}) {
@@ -303,12 +352,15 @@ public abstract class NoeAbstractBot extends Brain {
     return normalizeAngle(intendedAngle + Math.PI);
   }
 
-  // ------------------------------------------------------------------ //
+  protected void turnToward(double angle) {
+    double diff = normalizeAngle(angle - getHeading());
+    stepTurn(diff > 0 ? Parameters.Direction.RIGHT : Parameters.Direction.LEFT);
+  }
 
-  protected double normalizeAngle(double angle) {
-    while (angle > Math.PI)  angle -= 2 * Math.PI;
-    while (angle < -Math.PI) angle += 2 * Math.PI;
-    return angle;
+  protected double normalizeAngle(double a) {
+    while (a > Math.PI) a -= 2 * Math.PI;
+    while (a < -Math.PI) a += 2 * Math.PI;
+    return a;
   }
 
   protected double angleTo(double x, double y) {
@@ -325,45 +377,79 @@ public abstract class NoeAbstractBot extends Brain {
     myY += stepSize * Math.sin(getHeading());
   }
 
-  protected boolean isAligned(double targetAngle, double threshold) {
-    return Math.abs(normalizeAngle(targetAngle - getHeading())) < threshold;
+  protected boolean isAligned(double angle, double threshold) {
+    return Math.abs(normalizeAngle(angle - getHeading())) < threshold;
   }
 
   protected double round2(double v) {
     return Math.round(v * 100.0) / 100.0;
   }
 
-  protected boolean isSameDirection(double dir1, double dir2) {
-    double diff = Math.abs(normalizeAngle(dir1) - normalizeAngle(dir2));
+  protected boolean isSameDirection(double d1, double d2) {
+    double diff = Math.abs(normalizeAngle(d1) - normalizeAngle(d2));
     return diff < ANGLEPRECISION || Math.abs(diff - 2 * Math.PI) < ANGLEPRECISION;
   }
 
-  protected void startCurvedMove(int n, int k, Parameters.Direction dir, boolean alternate) {
-    curveN = n; curveK = k; curveTurnDir = dir;
-    curveMoving = true; curveTick = 0; curveActive = true;
-    curveAlternateState = alternate;
+  protected double targetX() {
+    return target.pos.getX();
   }
 
-  protected boolean stepCurvedMove(double stepSize) {
-    if (!curveActive) return false;
-    if (curveMoving) {
-      move();
-      updatePosition(stepSize);
-      curveTick++;
-      if (curveTick >= curveN) { curveTick = 0; curveMoving = false; }
-    } else {
-      stepTurn(curveTurnDir);
-      curveTick++;
-      if (curveTick >= curveK) {
-        curveTick = 0; curveMoving = true;
-        if (curveAlternateState)
-          curveTurnDir = (curveTurnDir == Parameters.Direction.RIGHT)
-              ? Parameters.Direction.LEFT : Parameters.Direction.RIGHT;
-      }
+  protected double targetY() {
+    return target.pos.getY();
+  }
+
+  protected boolean targetFound() {
+    return target.valid && !target.isStale();
+  }
+
+  private void addWreckedEnemy(IRadarResult r) {
+    double ex = myX + r.getObjectDistance() * Math.cos(r.getObjectDirection());
+    double ey = myY + r.getObjectDistance() * Math.sin(r.getObjectDirection());
+    Position newPos = new Position(ex, ey);
+    if (wreckedEnemiesPos.stream().noneMatch(p -> p.isClose(newPos)))
+      wreckedEnemiesPos.add(newPos);
+  }
+
+  private void receiveMessages() {
+    teamMessages.clear();
+    for (String raw : fetchAllMessages()) {
+      BotMessage msg = parseMessage(raw);
+      if (msg != null) teamMessages.add(msg);
     }
-    return true;
   }
 
-  protected void stopCurvedMove() { curveActive = false; }
-  protected boolean isCurvedMoveActive() { return curveActive; }
+  private BotMessage parseMessage(String raw) {
+    try {
+      String[] parts = raw.split("\\|");
+      int senderId = Integer.parseInt(parts[0]);
+      if (senderId == myId) return null;
+
+      double x = Double.NaN, y = Double.NaN;
+      double tx = Double.NaN, ty = Double.NaN;
+      double hp = 1.0;
+      int ta = 9999;
+      boolean sec = false;
+
+      for (int i = 1; i < parts.length; i++) {
+        String[] kv = parts[i].split(":");
+        if (kv.length < 2) continue;
+        switch (kv[0]) {
+          case "x" -> x = Double.parseDouble(kv[1]);
+          case "y" -> y = Double.parseDouble(kv[1]);
+          case "tx" -> tx = parseDoubleOrNaN(kv[1]);
+          case "ty" -> ty = parseDoubleOrNaN(kv[1]);
+          case "hp" -> hp = Double.parseDouble(kv[1]);
+          case "ta" -> ta = Integer.parseInt(kv[1]);
+          case "sec" -> sec = Integer.parseInt(kv[1]) == 1;
+        }
+      }
+      return new BotMessage(senderId, new Position(x, y), new Position(tx, ty), hp, ta, sec);
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  private double parseDoubleOrNaN(String s) {
+    return "NaN".equals(s) ? Double.NaN : Double.parseDouble(s);
+  }
 }
