@@ -41,10 +41,8 @@ public abstract class NoeAbstractBot extends Brain {
 
   protected record BotMessage(int senderId,
                               Position myPos,
-                              Position targetPos,
                               double hp,
-                              int targetAge,
-                              boolean targetIsSecondary) {
+                              List<TargetInfo> targets) {
   }
 
   protected static class TargetInfo {
@@ -108,6 +106,7 @@ public abstract class NoeAbstractBot extends Brain {
 
   protected final ArrayList<BotMessage> teamMessages = new ArrayList<>();
   protected final List<Position> wreckedEnemiesPos = new ArrayList<>();
+  protected final List<TargetInfo> targets = new ArrayList<>();
 
   protected double myX = 0, myY = 0;
   protected double targetAngle;
@@ -139,44 +138,47 @@ public abstract class NoeAbstractBot extends Brain {
   protected abstract void onStep();
 
   protected void broadcastStatus() {
+    StringBuilder t = new StringBuilder();
+    for (int i = 0; i < targets.size(); i++) {
+      TargetInfo target = targets.get(i);
+      if (i > 0) t.append(";");
+      t.append(round2(target.pos.getX())).append(",")
+        .append(round2(target.pos.getY())).append(",")
+        .append(target.age).append(",")
+        .append(target.isSecondary ? 1 : 0);
+    }
     String msg = myId
       + "|x:" + round2(myX)
       + "|y:" + round2(myY)
-      + "|tx:" + (target.valid ? round2(target.pos.getX()) : "NaN")
-      + "|ty:" + (target.valid ? round2(target.pos.getY()) : "NaN")
       + "|hp:" + round2(myHp)
-      + "|ta:" + (target.valid ? target.age : 9999)
-      + "|sec:" + (target.valid && target.isSecondary ? 1 : 0);
+      + "|targets:" + t;
     broadcast(msg);
   }
 
   protected void mergeTeamTargets() {
+    double bestDistSq = Double.POSITIVE_INFINITY;
+    double bestX = Double.NaN;
+    double bestY = Double.NaN;
     for (BotMessage bm : teamMessages) {
-      if (Double.isNaN(bm.targetPos().getX())) continue;
-
-      boolean incomingIsSecondary = bm.targetIsSecondary();
-      boolean fresher = bm.targetAge() < target.age;
-
-      // Priorité : secondary ennemi > main ennemi, mais un main reporté
-      // par n'importe quel allié reste valide
-      boolean shouldAdopt =
-        // On reçoit un secondary et on ne vise pas déjà un secondary
-        (incomingIsSecondary && !target.isSecondary)
-          // Ou notre cible est stale et l'info est plus fraîche
-          || (target.isStale() && fresher)
-          // Ou même type mais info plus fraîche
-          || (!incomingIsSecondary && !target.isSecondary && fresher);
-
-      if (shouldAdopt) {
-        target.update(bm.targetPos().getX(), bm.targetPos().getY(), incomingIsSecondary);
-        target.age = bm.targetAge() + 1;
+      for (TargetInfo t : bm.targets()) {
+        double tx = t.pos.getX();
+        double ty = t.pos.getY();
+        if (Double.isNaN(tx)) continue;
+        double dx = tx - myX;
+        double dy = ty - myY;
+        double distSq = dx * dx + dy * dy;
+        if (distSq < bestDistSq) {
+          bestDistSq = distSq;
+          bestX = tx;
+          bestY = ty;
+        }
       }
+    }
+    if (!Double.isNaN(bestX)) {
+      target.update(bestX, bestY);
     }
   }
 
-  /**
-   * Vide toutes les actions moins urgentes que le seuil (priority > threshold).
-   */
   protected void flushBelow(int threshold) {
     actionQueue.removeIf(a -> a.priority > threshold);
   }
@@ -227,8 +229,8 @@ public abstract class NoeAbstractBot extends Brain {
     return detectFront().getObjectType() == IFrontSensorResult.Types.WALL;
   }
 
-  protected void scanAround() {
-    double minDist = SECONDARY_RADAR_RANGE;
+  protected void scanAround(double radarRange) {
+    double minDist = radarRange;
     nearestEnemy = null;
 
     for (IRadarResult r : detectRadar()) {
@@ -243,9 +245,6 @@ public abstract class NoeAbstractBot extends Brain {
       double ex = myX + nearestEnemy.getObjectDistance() * Math.cos(nearestEnemy.getObjectDirection());
       double ey = myY + nearestEnemy.getObjectDistance() * Math.sin(nearestEnemy.getObjectDirection());
       boolean isSecondary = isSecondaryEnemy(nearestEnemy);
-      /*if (isSecondary && !target.isSecondary || target.isStale()) {
-        target.update(ex, ey, isSecondary);
-      }*/
       target.update(ex, ey);
     }
   }
@@ -423,28 +422,37 @@ public abstract class NoeAbstractBot extends Brain {
       String[] parts = raw.split("\\|");
       int senderId = Integer.parseInt(parts[0]);
       if (senderId == myId) return null;
-
       double x = Double.NaN, y = Double.NaN;
-      double tx = Double.NaN, ty = Double.NaN;
       double hp = 1.0;
-      int ta = 9999;
-      boolean sec = false;
-
+      List<TargetInfo> targets = new ArrayList<>();
       for (int i = 1; i < parts.length; i++) {
         String[] kv = parts[i].split(":");
         if (kv.length < 2) continue;
         switch (kv[0]) {
           case "x" -> x = Double.parseDouble(kv[1]);
           case "y" -> y = Double.parseDouble(kv[1]);
-          case "tx" -> tx = parseDoubleOrNaN(kv[1]);
-          case "ty" -> ty = parseDoubleOrNaN(kv[1]);
           case "hp" -> hp = Double.parseDouble(kv[1]);
-          case "ta" -> ta = Integer.parseInt(kv[1]);
-          case "sec" -> sec = Integer.parseInt(kv[1]) == 1;
+          case "targets" -> {
+            if (!kv[1].isEmpty()) {
+              String[] tList = kv[1].split(";");
+              for (String t : tList) {
+                String[] vals = t.split(",");
+                if (vals.length < 4) continue;
+                double tx = Double.parseDouble(vals[0]);
+                double ty = Double.parseDouble(vals[1]);
+                int age = Integer.parseInt(vals[2]);
+                boolean sec = Integer.parseInt(vals[3]) == 1;
+                TargetInfo target = new TargetInfo();
+                target.update(tx, ty, sec);
+                targets.add(target);
+              }
+            }
+          }
         }
       }
-      return new BotMessage(senderId, new Position(x, y), new Position(tx, ty), hp, ta, sec);
+      return new BotMessage(senderId, new Position(x, y), hp, targets);
     } catch (Exception e) {
+      System.out.println("iiiiiiii");
       return null;
     }
   }

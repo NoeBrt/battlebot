@@ -8,6 +8,7 @@ public class NoeMainBot extends NoeAbstractBot {
   private static final double AIM_THRESHOLD = 0.05;
   private static final double STEP_SIZE = Parameters.teamAMainBotSpeed;
   private static final double LATERAL_WEIGHT = 0.55;
+  private static final double RADAR_RANGE = Parameters.teamBMainBotFrontalDetectionRange;
 
   @Override
   public void activate() {
@@ -46,23 +47,24 @@ public class NoeMainBot extends NoeAbstractBot {
 
   @Override
   protected void onStep() {
-    broadcastStatus();
-    if (isDead()) return;
+    scanAround(RADAR_RANGE);
     mergeTeamTargets();
-
+    broadcastStatus();
+    if (isDead()) {
+      flushAll();
+      return;
+    }
     scan();
     executeNext();
   }
 
   private void scan() {
-    scanAround();
-    /*
     // Urgence 0 : deadzone
     if (isInDeadZone(myX, myY)) {
       flushAll();
       enqueueEscapePlan();
       return;
-    }*/
+    }
 
     // Urgence 1 : obstacle frontal — interrompt tout plan de déplacement
     if (isFrontObstacle()) {
@@ -97,7 +99,6 @@ public class NoeMainBot extends NoeAbstractBot {
   private void enqueueAttackPlan() {
     double dist = distanceTo(targetX(), targetY());
     double angle = angleTo(targetX(), targetY());
-    System.out.println(dist + ":" + FIRE_RANGE);
     if (dist <= FIRE_RANGE) {
       enqueue(BotAction.FIRE);
     } else {
@@ -136,8 +137,8 @@ public class NoeMainBot extends NoeAbstractBot {
   }
 
   private void enqueueForwardPlan() {
-    //double safe = safeAngle(getHeading(), STEP_SIZE);
-    //if (!isAligned(safe, AIM_THRESHOLD)) enqueueTurnToward(safe);
+    double safe = safeAngle(getHeading(), STEP_SIZE);
+    if (!isAligned(safe, AIM_THRESHOLD)) enqueueTurnToward(safe);
     for (int i = 0; i < 5; i++) enqueue(BotAction.MOVE_FWD);
   }
 

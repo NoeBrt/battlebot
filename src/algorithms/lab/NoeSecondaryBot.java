@@ -6,7 +6,7 @@ import characteristics.Parameters;
 public class NoeSecondaryBot extends NoeAbstractBot {
 
   private static final double STEP_SIZE = Parameters.teamASecondaryBotSpeed;
-
+  private static final double RADAR_RANGE = Parameters.teamASecondaryBotFrontalDetectionRange;
   private static final double AIM_THRESHOLD = 0.05;
   private static final double ORBIT_RADIUS = 300.0;  // distance orbitale cible
   private static final double ORBIT_REPLAN_THRESHOLD = 20.0; // replanifie si cible dévie de + de N px
@@ -50,7 +50,7 @@ public class NoeSecondaryBot extends NoeAbstractBot {
 
   @Override
   protected void onStep() {
-    scanAround();
+    scanAround(RADAR_RANGE);
     mergeTeamTargets();
     broadcastStatus();
     if (isDead()) {
@@ -58,7 +58,9 @@ public class NoeSecondaryBot extends NoeAbstractBot {
       return;
     }
     if (targetFound()) {
-      enqueueForwardPlan();
+      flushAll();
+      enqueueOrbitBlock();
+      //enqueueForwardPlan();
     } else if (actionQueue.isEmpty()) {
       enqueueForwardPlan();
     }
