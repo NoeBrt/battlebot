@@ -75,7 +75,7 @@ public class NoeMainBot extends NoeAbstractBot {
 
     if (actionQueue.isEmpty() || onlyMovesLeft()) {
       if (targetFound()) {
-        flushBelow(2);
+        //flushBelow(2);
         enqueueAttackPlan();
       } else {
         if (actionQueue.isEmpty()) enqueueForwardPlan();
@@ -97,7 +97,7 @@ public class NoeMainBot extends NoeAbstractBot {
   private void enqueueAttackPlan() {
     double dist = distanceTo(targetX(), targetY());
     double angle = angleTo(targetX(), targetY());
-
+    System.out.println(dist + ":" + FIRE_RANGE);
     if (dist <= FIRE_RANGE) {
       enqueue(BotAction.FIRE);
     } else {
@@ -136,8 +136,8 @@ public class NoeMainBot extends NoeAbstractBot {
   }
 
   private void enqueueForwardPlan() {
-    double safe = safeAngle(getHeading(), STEP_SIZE);
-    if (!isAligned(safe, AIM_THRESHOLD)) enqueueTurnToward(safe);
+    //double safe = safeAngle(getHeading(), STEP_SIZE);
+    //if (!isAligned(safe, AIM_THRESHOLD)) enqueueTurnToward(safe);
     for (int i = 0; i < 5; i++) enqueue(BotAction.MOVE_FWD);
   }
 
