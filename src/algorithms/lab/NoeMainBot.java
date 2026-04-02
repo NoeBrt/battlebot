@@ -54,6 +54,7 @@ public class NoeMainBot extends NoeAbstractBot {
 
   @Override
   protected void onStep() {
+    scanAround();
     broadcastStatus();
     if (isDead()) { transitionTo(RADAR_MODE); return; }
     mergeTeamTargets();
@@ -61,7 +62,6 @@ public class NoeMainBot extends NoeAbstractBot {
       transitionTo(ATTACK_MODE);
       return;
     }
-    scanAround();
     if (isInDeadZone(myX, myY) && currentState != AVOID_DEAD_ZONE) {
       transitionTo(AVOID_DEAD_ZONE);
       return;

@@ -150,7 +150,7 @@ public abstract class NoeAbstractBot extends Brain {
     for (BotMessage bm : teamMessages) {
       if (Double.isNaN(bm.targetPos().getX()) || Double.isNaN(bm.targetPos().getY())) continue;
       // On met à jour uniquement si la cible alliée est plus fraîche que la nôtre
-      if (!target.valid || bm.targetAge() < target.age) {
+      if (nearestEnemy == null && (!target.valid || bm.targetAge() < target.age)) {
         target.update(bm.targetPos().getX(), bm.targetPos().getY());
         // On simule l'âge reçu (le message a voyagé 1 tick)
         target.age = bm.targetAge() + 1;
