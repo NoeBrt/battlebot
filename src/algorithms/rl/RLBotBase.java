@@ -1,0 +1,374 @@
+/* ============================================================================
+ * RLBotBase.java — RL-optimized base (extends MacDuoBaseBot).
+ * All strategy constants read from RLConfig.
+ * ============================================================================*/
+package algorithms.rl;
+
+import java.util.*;
+import algorithms.external.*;
+import characteristics.IRadarResult;
+import characteristics.IRadarResult.Types;
+import characteristics.Parameters;
+
+public abstract class RLBotBase extends MacDuoBaseBot {
+
+    protected boolean teamA;
+    protected int currentTick = 0;
+
+    // Use a custom enemy wrapper for RL state tracking (stale, damage estimation)
+    protected static class RLEnemy {
+        public double x, y, prevX, prevY, ppX, ppY;
+        public double speedX, speedY;
+        public double distance, direction;
+        public Types type;
+        public int updateCount;
+        public int lastSeenTick; 
+        public int estimatedDmg;
+
+        RLEnemy(double x, double y, double d, double dir, Types t, int tick) {
+            this.x = prevX = ppX = x;
+            this.y = prevY = ppY = y;
+            distance = d; direction = dir; type = t;
+            updateCount = 0; lastSeenTick = tick; estimatedDmg = 0;
+        }
+
+        void update(double nx, double ny, double nd, double ndir, int tick) {
+            ppX = prevX; ppY = prevY;
+            prevX = x; prevY = y;
+            x = nx; y = ny; distance = nd; direction = ndir;
+            if (tick > lastSeenTick) updateCount++;
+            lastSeenTick = tick;
+            if (updateCount >= 2) { speedX = x - prevX; speedY = y - prevY; }
+            else { speedX = 0; speedY = 0; }
+        }
+    }
+
+    protected List<RLEnemy> rlEnemies = new ArrayList<>();
+    protected RLEnemy lastTarget = null;
+    protected String focusedTargetKey = null;
+
+    @Override
+    public void activate() {
+        // super.activate(); // REMOVED: Brain.activate() is abstract
+        
+        // Initialize fields
+        this.teamA = (getHeading() == Parameters.EAST);
+        this.isTeamA = teamA; 
+        currentTick = 0;
+        rlEnemies.clear();
+        this.myPos = new Position(0, 0); // Initialize to avoid NPE. Logic updates this.
+        
+        // Reset allied positions if needed (kept in map)
+        // MacDuoBaseBot constructor initialized them.
+    }
+
+    @Override
+    public void step() {
+        // super.step(); // REMOVED: Brain.step() is abstract
+        
+        currentTick++;
+        sendMyPosition(); // Use helper from MacDuoBaseBot to broadcast position
+        detection();
+        pruneStaleEnemies();
+        readMessages(); // Helper to process communication
+    }
+    
+    // Helper for navigation
+    protected void goTo(double x, double y) {
+        double angle = Math.atan2(y - myPos.getY(), x - myPos.getX());
+        double forwardDiff = Math.abs(normalize(angle - getHeading()));
+        double forwardDiffWrapped = Math.abs(forwardDiff - 2 * Math.PI);
+        double minForward = Math.min(forwardDiff, forwardDiffWrapped);
+        
+        double backwardBodyAngle = normalize(angle - Math.PI);
+        double backwardDiff = Math.abs(normalize(backwardBodyAngle - getHeading()));
+        double backwardDiffWrapped = Math.abs(backwardDiff - 2 * Math.PI);
+        double minBackward = Math.min(backwardDiff, backwardDiffWrapped);
+
+        if (minBackward < minForward) {
+            if (!isSameDirection(getHeading(), backwardBodyAngle)) {
+                turnTo(backwardBodyAngle);
+            } else {
+                myMove(false);
+            }
+        } else {
+            if (!isSameDirection(getHeading(), angle)) {
+                turnTo(angle);
+            } else {
+                myMove(true);
+            }
+        }
+    }
+    
+    // Communication helpers
+    protected void readMessages() {
+        ArrayList<String> messages = fetchAllMessages();
+        for (String msg : messages) {
+            String[] parts = msg.split(" ");
+            if (parts.length < 2) continue;
+            
+            String header = parts[0];
+            switch (header) {
+                case "ENEMY":
+                    // Format: ENEMY dir dist type x y
+                    if (parts.length >= 6) {
+                        try {
+                            double dir = Double.parseDouble(parts[1]);
+                            double dist = Double.parseDouble(parts[2]);
+                            Types type = parts[3].contains("MainBot") ? Types.OpponentMainBot : Types.OpponentSecondaryBot;
+                            double x = Double.parseDouble(parts[4]);
+                            double y = Double.parseDouble(parts[5]);
+                            updateRLEnemy(x, y, dist, dir, type);
+                        } catch(Exception e) {}
+                    }
+                    break;
+                case "POS":
+                     // POS who x y heading
+                     if (parts.length >= 5) {
+                         String who = parts[1];
+                         double x = Double.parseDouble(parts[2]);
+                         double y = Double.parseDouble(parts[3]);
+                         double h = Double.parseDouble(parts[4]);
+                         BotState b = allyPos.get(who);
+                         if (b == null) allyPos.put(who, new BotState(x, y, true, who, h));
+                         else b.setPosition(x, y, h);
+                     }
+                     break;
+                case "DEAD":
+                     BotState b = allyPos.get(parts[1]);
+                     if (b != null) b.setAlive(false);
+                     break;
+                case "WRECK":
+                     // WRECK x y
+                     if (parts.length >= 3) {
+                         double x = Double.parseDouble(parts[1]);
+                         double y = Double.parseDouble(parts[2]);
+                         boolean exists = false;
+                         for (double[] w : wreckPositions) {
+                             if (Math.abs(w[0] - x) < 20 && Math.abs(w[1] - y) < 20) { exists = true; break; }
+                         }
+                         if (!exists) wreckPositions.add(new double[]{x, y});
+                     }
+                     break;
+            }
+        }
+    }
+    
+    private void updateRLEnemy(double x, double y, double d, double dir, Types type) {
+        for (RLEnemy e : rlEnemies) {
+            if (e.type == type && Math.hypot(e.x - x, e.y - y) < 60) {
+                e.update(x, y, d, dir, currentTick);
+                return;
+            }
+        }
+        rlEnemies.add(new RLEnemy(x, y, d, dir, type, currentTick));
+    }
+
+    @Override
+    protected void detection() {
+        for (IRadarResult o : detectRadar()) {
+            if (o.getObjectType() == Types.OpponentMainBot || o.getObjectType() == Types.OpponentSecondaryBot) {
+                // Broadcast for team coordination
+                broadcast("ENEMY " + o.getObjectDirection() + " " + o.getObjectDistance() + " " + 
+                          (o.getObjectType() == Types.OpponentMainBot ? "MainBot" : "SecondaryBot") + " " + 
+                          (myPos.getX() + o.getObjectDistance() * Math.cos(o.getObjectDirection())) + " " + 
+                          (myPos.getY() + o.getObjectDistance() * Math.sin(o.getObjectDirection())));
+
+                double d = o.getObjectDistance();
+                double dir = o.getObjectDirection();
+                double ox = myPos.getX() + d * Math.cos(dir);
+                double oy = myPos.getY() + d * Math.sin(dir);
+                
+                boolean found = false;
+                for (RLEnemy e : rlEnemies) {
+                    if (e.type == o.getObjectType() && Math.hypot(e.x - ox, e.y - oy) < 60) {
+                        e.update(ox, oy, d, dir, currentTick);
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    rlEnemies.add(new RLEnemy(ox, oy, d, dir, o.getObjectType(), currentTick));
+                }
+            } else if (o.getObjectType() == Types.Wreck) {
+                 double ox = myPos.getX() + o.getObjectDistance() * Math.cos(o.getObjectDirection());
+                 double oy = myPos.getY() + o.getObjectDistance() * Math.sin(o.getObjectDirection());
+                 // Using MacDuoBaseBot wreck storage
+                 boolean exists = false;
+                 for (double[] w : wreckPositions) {
+                     if (Math.abs(w[0] - ox) < 20 && Math.abs(w[1] - oy) < 20) { exists = true; break; }
+                 }
+                 if (!exists) wreckPositions.add(new double[]{ox, oy});
+            }
+        }
+    }
+
+    protected void pruneStaleEnemies() {
+        rlEnemies.removeIf(e -> (currentTick - e.lastSeenTick) > RLConfig.STALE_TTL);
+    }
+
+    private String enemyKey(RLEnemy e) {
+        int qx = (int)(e.x / 100.0);
+        int qy = (int)(e.y / 100.0);
+        return e.type.name() + "_" + qx + "_" + qy;
+    }
+
+    protected Double aimAndMaybeFire(RLEnemy target) {
+        if (target == null) return null;
+        double dist = Math.hypot(target.x - myPos.getX(), target.y - myPos.getY());
+        if (dist > Parameters.bulletRange) return null;
+
+        double t = dist / Parameters.bulletVelocity;
+        double predX = target.x + target.speedX * t;
+        double predY = target.y + target.speedY * t;
+
+        if (!isFiringLineSafe(predX, predY)) return null;
+
+        return Math.atan2(predY - myPos.getY(), predX - myPos.getX());
+    }
+
+    protected RLEnemy chooseBestTarget() {
+        RLEnemy best = null;
+        double maxScore = -Double.MAX_VALUE;
+
+        for (RLEnemy e : rlEnemies) {
+            int stale = currentTick - e.lastSeenTick;
+            if (stale > RLConfig.STALE_TTL) continue;
+
+            double dist = Math.hypot(e.x - myPos.getX(), e.y - myPos.getY());
+            double score = 0;
+
+            score += (RLConfig.TARGET_PROXIMITY_WEIGHT - dist);
+            if (e.type == Types.OpponentSecondaryBot) score += RLConfig.TARGET_TYPE_BONUS;
+
+            double hp = (e.type == Types.OpponentSecondaryBot ? RLConfig.MAX_HEALTH_SEC : RLConfig.MAX_HEALTH_MAIN) - e.estimatedDmg;
+            if (hp < 30) score += RLConfig.TARGET_LOWHP_CRITICAL_BONUS;
+            else if (hp < 60) score += RLConfig.TARGET_LOWHP_MODERATE_BONUS;
+
+            if (focusedTargetKey != null && focusedTargetKey.equals(enemyKey(e)))
+                score += RLConfig.TARGET_FOCUS_BONUS;
+            if (isFiringLineSafe(e.x, e.y)) score += RLConfig.TARGET_SAFEFIRE_BONUS;
+            score -= (stale * RLConfig.TARGET_STALE_PENALTY);
+
+            if (score > maxScore) {
+                maxScore = score;
+                best = e;
+            }
+        }
+
+        focusedTargetKey = (best != null) ? enemyKey(best) : null;
+        return best;
+    }
+
+    protected boolean isFiringLineSafe(double tx, double ty) {
+        double x1 = myPos.getX(), y1 = myPos.getY();
+        double x2 = tx, y2 = ty;
+        double dx = x2 - x1, dy = y2 - y1;
+        double lenSq = dx*dx + dy*dy;
+        if (lenSq == 0) return true;
+
+        for (BotState b : allyPos.values()) {
+            if (!b.isAlive() || Math.hypot(b.getPosition().getX() - x1, b.getPosition().getY() - y1) < 1.0) continue;
+
+            double bx = b.getPosition().getX();
+            double by = b.getPosition().getY();
+
+            // Project point onto line segment (parameter t)
+            double t = ((bx - x1) * dx + (by - y1) * dy) / lenSq;
+
+            // Check if projection falls within segment [0, 1]
+            if (t < 0 || t > 1) continue;
+
+            // Distance from point to line
+            double proX = x1 + t * dx;
+            double proY = y1 + t * dy;
+            double distSq = (bx - proX)*(bx - proX) + (by - proY)*(by - proY);
+
+            if (distSq < (RLConfig.FIRING_SAFETY_RADIUS * RLConfig.FIRING_SAFETY_RADIUS)) return false;
+        }
+        return true; 
+    }
+
+    protected void potentialFieldMove(double kiteMin, double kiteMax) {
+        double fx = 0, fy = 0;
+        double swirlDir = teamA ? 1.0 : -1.0;
+
+        // 1. Enemy Field
+        for (RLEnemy e : rlEnemies) {
+            double dx = myPos.getX() - e.x;
+            double dy = myPos.getY() - e.y;
+            double d = Math.hypot(dx, dy);
+            if (d == 0) continue;
+
+            double force = 0;
+            if (d < kiteMin) force = RLConfig.PF_ENEMY_REPEL_STRENGTH * (kiteMin - d) / 100.0;
+            else if (d > kiteMax) force = -RLConfig.PF_ENEMY_ATTRACT_STRENGTH * (d - kiteMax) / 100.0;
+
+            fx += (dx/d) * force;
+            fy += (dy/d) * force;
+
+            // Tangential (distance-scaled, team-aware swirl)
+            double tangentialScale = RLConfig.TANGENTIAL_SCALE_REF / Math.max(d, RLConfig.TANGENTIAL_MIN_DIST);
+            fx += -(dy/d) * RLConfig.PF_TANGENTIAL_STRENGTH * tangentialScale * swirlDir;
+            fy += (dx/d) * RLConfig.PF_TANGENTIAL_STRENGTH * tangentialScale * swirlDir;
+        }
+
+        // 2. Ally Repel
+        for (BotState b : allyPos.values()) {
+             if (!b.isAlive() || Math.hypot(b.getPosition().getX() - myPos.getX(), b.getPosition().getY() - myPos.getY()) < 1.0) continue;
+             double dx = myPos.getX() - b.getPosition().getX();
+             double dy = myPos.getY() - b.getPosition().getY();
+             double d = Math.hypot(dx, dy);
+             if (d < RLConfig.PF_ALLY_REPEL_RANGE && d > 0) {
+                 double force = RLConfig.PF_ALLY_REPEL_STRENGTH * (RLConfig.PF_ALLY_REPEL_RANGE - d) / RLConfig.PF_ALLY_REPEL_RANGE;
+                 fx += (dx/d) * force;
+                 fy += (dy/d) * force;
+             }
+        }
+
+        // 3. Wall Repel
+        double wallD = RLConfig.WALL_MARGIN;
+        if (myPos.getX() < wallD) fx += RLConfig.PF_WALL_STRENGTH * (wallD - myPos.getX());
+        if (myPos.getX() > RLConfig.MAP_WIDTH - wallD) fx -= RLConfig.PF_WALL_STRENGTH * (myPos.getX() - (RLConfig.MAP_WIDTH - wallD));
+        if (myPos.getY() < wallD) fy += RLConfig.PF_WALL_STRENGTH * (wallD - myPos.getY());
+        if (myPos.getY() > RLConfig.MAP_HEIGHT - wallD) fy -= RLConfig.PF_WALL_STRENGTH * (myPos.getY() - (RLConfig.MAP_HEIGHT - wallD));
+
+        // 4. Wreck Repel
+        for (double[] w : wreckPositions) {
+            double dx = myPos.getX() - w[0];
+            double dy = myPos.getY() - w[1];
+            double d = Math.hypot(dx, dy);
+            if (d < RLConfig.PF_WRECK_RANGE && d > 0) {
+                double force = RLConfig.PF_WALL_STRENGTH * (RLConfig.PF_WRECK_RANGE - d) / RLConfig.PF_WRECK_RANGE;
+                fx += (dx/d) * force;
+                fy += (dy/d) * force;
+            }
+        }
+
+        double moveAngle = Math.atan2(fy, fx);
+        if (Double.isNaN(moveAngle)) moveAngle = getHeading();
+        
+        double forwardDiff = Math.abs(normalize(moveAngle - getHeading()));
+        double forwardDiffWrapped = Math.abs(forwardDiff - 2 * Math.PI);
+        double minForward = Math.min(forwardDiff, forwardDiffWrapped);
+        
+        double backwardBodyAngle = normalize(moveAngle - Math.PI);
+        double backwardDiff = Math.abs(normalize(backwardBodyAngle - getHeading()));
+        double backwardDiffWrapped = Math.abs(backwardDiff - 2 * Math.PI);
+        double minBackward = Math.min(backwardDiff, backwardDiffWrapped);
+
+        if (minBackward < minForward) {
+            if (!isSameDirection(getHeading(), backwardBodyAngle)) {
+                turnTo(backwardBodyAngle);
+            } else {
+                myMove(false);
+            }
+        } else {
+            if (!isSameDirection(getHeading(), moveAngle)) {
+                turnTo(moveAngle);
+            } else {
+                myMove(true);
+            }
+        }
+    }
+}

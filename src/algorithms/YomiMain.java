@@ -18,7 +18,7 @@ import java.lang.reflect.Field;
 import java.util.*;
 import java.util.stream.Stream;
 
-  
+
 
 public class YomiMain extends Brain {
     private static final double POS_PRECISION = 1;
@@ -128,10 +128,10 @@ public class YomiMain extends Brain {
         }
     }
 
-    
+
     private Coords[] defineEnemyBasePatrol() {
         Coords topLeft, bottomLeft, topRight, bottomRight;
-    
+
         if (isTeamA) {
             // Base ennemie = Team B
             topLeft = new Coords(1500, 500);
@@ -145,7 +145,7 @@ public class YomiMain extends Brain {
             bottomRight = new Coords(1500, 1500);
             topRight = new Coords(1500, 500);
         }
-    
+
         return new Coords[]{topLeft, bottomLeft, bottomRight, topRight};
     }
 
@@ -158,7 +158,7 @@ public class YomiMain extends Brain {
             Parameters.NORTH,   // TOPRIGHT → Va à gauche
         };
     }
- 
+
     public Task avoidObtsacleTask(int priority){
         return new YomiMain.Task(priority + 1) {
             private double rightToGo = 0;
@@ -201,7 +201,7 @@ public class YomiMain extends Brain {
     private Bot bSecondary2;
     private ArrayList<Bot> teamA = new ArrayList<Bot>();
     private Bot bot;
-  
+
     private ArrayList<Bot> teamB = new ArrayList<Bot>();
     public static Object getAttribute(Object obj, String fieldName) throws Exception {
         Field field = obj.getClass().getDeclaredField(fieldName);
@@ -242,7 +242,7 @@ public class YomiMain extends Brain {
         //     System.out.println("Error");
         // }
 
-    } 
+    }
     private Task fireOnEnnemyTask(){
         return new YomiMain.Task(9_000_000, true) {
             boolean step() {
@@ -342,9 +342,9 @@ public class YomiMain extends Brain {
                 return false;
             }
         });
-        
+
         if (isScout) {
-            addTask(new Task(8_000_000, true) {  
+            addTask(new Task(8_000_000, true) {
                 private int patrolStep = isTeamA?(myId ==4?2:3):(myId ==4?1:3);
                 private boolean reachedBase = false;
                 private final Coords[] patrolPoints = defineEnemyBasePatrol();
@@ -360,12 +360,12 @@ public class YomiMain extends Brain {
                             reachedBase = true; // Une fois arrivé, commencer la patrouille
                         } else {
                             if (turnUntil(target.minus(myPos).angle())) {
-                                return true; 
+                                return true;
                             }
                             if (findObstacle(true)) {
                                 System.out.println(myId+" Obstacle detected");
                                 sendLogMessage(myId+" Obstacle detected");
-                                stepTurn(Parameters.Direction.RIGHT); 
+                                stepTurn(Parameters.Direction.RIGHT);
                                 addTask(avoidObtsacleTask(priority));
                                 return true;
                             }
@@ -376,7 +376,7 @@ public class YomiMain extends Brain {
                     sendLogMessage(myId + " patrolling");
                     return patrolRectangle();
                 }
-        
+
                 private boolean patrolRectangle() {
                     // Vérifier si on est proche d'un coin du rectangle
                     if (myPos.inRange(patrolPoints[patrolStep], 100)) {
@@ -391,7 +391,7 @@ public class YomiMain extends Brain {
                         return true; // Attend d'être bien aligné avant d'avancer
                     }else{
                         sendLogMessage(id + " has heading of to " + getHeading());
-                    } 
+                    }
                     if (findObstacle(true)) {
                         System.out.println(myId+" Obstacle detected");
                         sendLogMessage(myId+" Obstacle detected");
@@ -405,7 +405,7 @@ public class YomiMain extends Brain {
                 }
             });
         }
-        
+
 
         if (isScout) {
             addTask(foundUp == foundTeamA ?
@@ -519,7 +519,7 @@ public class YomiMain extends Brain {
                         return true;
                     }
                 }
-              
+
                 sendLogMessage(id + " moving");
                 move();
                 return true;
@@ -633,7 +633,7 @@ public class YomiMain extends Brain {
             return new Target(coords.minus(pos), turn, prevCoords == null ? null : prevCoords.minus(pos), prevTurn, type);
         }
     }
-  
+
     private static class TargetSet extends ArrayList<Target> implements Set<Target> {
         @Override
         public boolean add(Target target) {
@@ -675,7 +675,7 @@ public class YomiMain extends Brain {
         }
         StringBuilder targetsBroadcast = new StringBuilder("coords ").append(id);
         for (Target target : foundTargets) {
-         
+
             targetsBroadcast
                 .append(" ").append(target.coords.x())
                 .append(";").append(target.coords.y())
@@ -690,7 +690,7 @@ public class YomiMain extends Brain {
 
 
         for (var t: foundTargets) {
-            if(t.enemy() ) 
+            if(t.enemy() )
                 absoluteTargets.add(t.coords, t.turn, t.type);
         }
         for (String message : getMessages()) {
@@ -738,7 +738,7 @@ public class YomiMain extends Brain {
         isFiring = true;
         return true;
     }
- 
+
     private Coords tryFindAngle(Coords from, Target to) {
         double time = to.coords.minus(from).norm() / Parameters.bulletVelocity;
         Coords futureCoords = to.coordsAtTurn(turn + (int) Math.ceil(time));
@@ -781,7 +781,7 @@ record Coords(double x, double y) {
     public Coords {
         if (Double.isNaN(x) || Double.isNaN(y)) throw new IllegalArgumentException();
     }
-    
+
     public double getX() { return x; }
 
     public double getY() { return y; }
@@ -850,7 +850,7 @@ record Coords(double x, double y) {
         return Math.sqrt(Math.pow(other.getX() - x, 2) +
                          Math.pow(other.getY() - y, 2));
       }
-    
+
 
     @Override
     public int hashCode() {
