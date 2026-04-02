@@ -26,11 +26,21 @@ public abstract class NoeAbstractBot extends Brain {
         Math.abs(y - p.y) < EPSILON;
     }
 
-    public double getX() { return x; }
-    public double getY() { return y; }
+    public double getX() {
+      return x;
+    }
 
-    public void setX(double x) { this.x = x; }
-    public void setY(double y) { this.y = y; }
+    public double getY() {
+      return y;
+    }
+
+    public void setX(double x) {
+      this.x = x;
+    }
+
+    public void setY(double y) {
+      this.y = y;
+    }
   }
 
   //  Format broadcast : "id:state|x:val|y:val|tx:val|ty:val|hp:val|ta:val"
@@ -38,7 +48,8 @@ public abstract class NoeAbstractBot extends Brain {
   protected record BotMessage(int senderId, State senderState,
                               Position myPos,
                               Position targetPos,
-                              double hp, int targetAge) {}
+                              double hp, int targetAge) {
+  }
 
   protected static class TargetInfo {
     Position pos;
@@ -58,9 +69,13 @@ public abstract class NoeAbstractBot extends Brain {
       valid = true;
     }
 
-    void tick() { if (valid) age++; }
+    void tick() {
+      if (valid) age++;
+    }
 
-    boolean isStale() { return !valid || age > NoeAbstractBot.MAX_TARGET_AGE; }
+    boolean isStale() {
+      return !valid || age > NoeAbstractBot.MAX_TARGET_AGE;
+    }
   }
 
   protected static final int MAX_TARGET_AGE = 30; // ticks avant d'oublier la cible
@@ -95,9 +110,18 @@ public abstract class NoeAbstractBot extends Brain {
 
   protected final TargetInfo target = new TargetInfo();
 
-  protected double targetX() { return target.pos.getX(); }
-  protected double targetY() { return target.pos.getY(); }
-  protected boolean targetFound() { return target.valid && !target.isStale(); }
+  protected double targetX() {
+    return target.pos.getX();
+  }
+
+  protected double targetY() {
+    return target.pos.getY();
+  }
+
+  protected boolean targetFound() {
+    return target.valid && !target.isStale();
+  }
+
   protected List<Position> wreckedEnemiesPos = new ArrayList<>();
   protected IRadarResult nearestEnemy = null;
 
@@ -106,6 +130,8 @@ public abstract class NoeAbstractBot extends Brain {
   protected State previousState;
   protected State currentState;
   protected boolean isTeamA;
+  protected double targetAngle = 0;
+  protected boolean avoidRecalcDone = false;
 
   protected int curveN;
   protected int curveK;
@@ -129,7 +155,7 @@ public abstract class NoeAbstractBot extends Brain {
     target.tick();          // vieillit la cible à chaque tick
     receiveMessages();
     sendLogMessage("[Bot:" + myId + "] " + round2(myX) + "," + round2(myY)
-        + (target.valid ? " tgt=(" + round2(target.pos.getX()) + "," + round2(target.pos.getY()) + ") age=" + target.age : ""));
+      + (target.valid ? " tgt=(" + round2(target.pos.getX()) + "," + round2(target.pos.getY()) + ") age=" + target.age : ""));
     onStep();
   }
 
@@ -137,12 +163,12 @@ public abstract class NoeAbstractBot extends Brain {
 
   protected void broadcastStatus() {
     String msg = myId + ":" + currentState
-        + "|x:" + round2(myX)
-        + "|y:" + round2(myY)
-        + "|tx:" + (target.valid ? round2(target.pos.getX()) : "NaN")
-        + "|ty:" + (target.valid ? round2(target.pos.getY()) : "NaN")
-        + "|hp:" + round2(myHp)
-        + "|ta:" + (target.valid ? target.age : 9999);
+      + "|x:" + round2(myX)
+      + "|y:" + round2(myY)
+      + "|tx:" + (target.valid ? round2(target.pos.getX()) : "NaN")
+      + "|ty:" + (target.valid ? round2(target.pos.getY()) : "NaN")
+      + "|hp:" + round2(myHp)
+      + "|ta:" + (target.valid ? target.age : 9999);
     broadcast(msg);
   }
 
@@ -195,8 +221,8 @@ public abstract class NoeAbstractBot extends Brain {
         String[] kv = sections[i].split(":");
         if (kv.length < 2) continue;
         switch (kv[0]) {
-          case "x"  -> x  = Double.parseDouble(kv[1]);
-          case "y"  -> y  = Double.parseDouble(kv[1]);
+          case "x" -> x = Double.parseDouble(kv[1]);
+          case "y" -> y = Double.parseDouble(kv[1]);
           case "tx" -> tx = parseDoubleOrNaN(kv[1]);
           case "ty" -> ty = parseDoubleOrNaN(kv[1]);
           case "hp" -> hp = Double.parseDouble(kv[1]);
@@ -243,7 +269,7 @@ public abstract class NoeAbstractBot extends Brain {
 
   protected boolean isEnemy(IRadarResult r) {
     return r.getObjectType() == IRadarResult.Types.OpponentMainBot
-        || r.getObjectType() == IRadarResult.Types.OpponentSecondaryBot;
+      || r.getObjectType() == IRadarResult.Types.OpponentSecondaryBot;
   }
 
   private boolean isWreckedEnemy(IRadarResult r) {
@@ -303,10 +329,43 @@ public abstract class NoeAbstractBot extends Brain {
     return normalizeAngle(intendedAngle + Math.PI);
   }
 
+  protected double computeAvoidAngle() {
+    double obstacleAngle = Double.NaN;
+    double minDist = Double.MAX_VALUE;
+    for (IRadarResult r : detectRadar()) {
+      double relAngle = normalizeAngle(r.getObjectDirection() - getHeading());
+      if (Math.abs(relAngle) < Math.PI / 2 && r.getObjectDistance() < minDist) {
+        minDist = r.getObjectDistance();
+        obstacleAngle = relAngle;
+      }
+    }
+    if (Double.isNaN(obstacleAngle)) {
+      return normalizeAngle(getHeading() + Parameters.RIGHTTURNFULLANGLE);
+    }
+    if (obstacleAngle < 0) {
+      return normalizeAngle(getHeading() + Parameters.RIGHTTURNFULLANGLE);
+    } else {
+      return normalizeAngle(getHeading() - Parameters.RIGHTTURNFULLANGLE);
+    }
+  }
+
+  protected double computeEscapeAngle(double stepSize) {
+    double base = safeAngle(getHeading(), stepSize);
+    double alt1 = normalizeAngle(base + Math.PI / 2);
+    double alt2 = normalizeAngle(base - Math.PI / 2);
+    double alt3 = normalizeAngle(base + Math.PI);
+    for (double candidate : new double[]{base, alt1, alt2, alt3}) {
+      double cx = myX + stepSize * Math.cos(candidate);
+      double cy = myY + stepSize * Math.sin(candidate);
+      if (!isInDeadZone(cx, cy)) return candidate;
+    }
+    return base;
+  }
+
   // ------------------------------------------------------------------ //
 
   protected double normalizeAngle(double angle) {
-    while (angle > Math.PI)  angle -= 2 * Math.PI;
+    while (angle > Math.PI) angle -= 2 * Math.PI;
     while (angle < -Math.PI) angle += 2 * Math.PI;
     return angle;
   }
@@ -339,8 +398,12 @@ public abstract class NoeAbstractBot extends Brain {
   }
 
   protected void startCurvedMove(int n, int k, Parameters.Direction dir, boolean alternate) {
-    curveN = n; curveK = k; curveTurnDir = dir;
-    curveMoving = true; curveTick = 0; curveActive = true;
+    curveN = n;
+    curveK = k;
+    curveTurnDir = dir;
+    curveMoving = true;
+    curveTick = 0;
+    curveActive = true;
     curveAlternateState = alternate;
   }
 
@@ -350,20 +413,29 @@ public abstract class NoeAbstractBot extends Brain {
       move();
       updatePosition(stepSize);
       curveTick++;
-      if (curveTick >= curveN) { curveTick = 0; curveMoving = false; }
+      if (curveTick >= curveN) {
+        curveTick = 0;
+        curveMoving = false;
+      }
     } else {
       stepTurn(curveTurnDir);
       curveTick++;
       if (curveTick >= curveK) {
-        curveTick = 0; curveMoving = true;
+        curveTick = 0;
+        curveMoving = true;
         if (curveAlternateState)
           curveTurnDir = (curveTurnDir == Parameters.Direction.RIGHT)
-              ? Parameters.Direction.LEFT : Parameters.Direction.RIGHT;
+            ? Parameters.Direction.LEFT : Parameters.Direction.RIGHT;
       }
     }
     return true;
   }
 
-  protected void stopCurvedMove() { curveActive = false; }
-  protected boolean isCurvedMoveActive() { return curveActive; }
+  protected void stopCurvedMove() {
+    curveActive = false;
+  }
+
+  protected boolean isCurvedMoveActive() {
+    return curveActive;
+  }
 }

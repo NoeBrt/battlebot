@@ -61,11 +61,11 @@ public class NoeMainBot extends NoeAbstractBot {
     if (allyFoundATargetWhileBeingFree()) {
       transitionTo(ATTACK_MODE);
       return;
-    }
-    if (isInDeadZone(myX, myY) && currentState != AVOID_DEAD_ZONE) {
+    }/*
+    if (isInDeadZone(myX, myY) && currentState != AVOID_DEAD_ZONE && currentState != AVOID_OBSTACLE) {
       transitionTo(AVOID_DEAD_ZONE);
       return;
-    }
+    }*/
     switch (currentState) {
       case MOVE_FORWARD -> stateMoveForward();
       case IDLE_WATCH   -> stateIdleWatch();
@@ -73,7 +73,7 @@ public class NoeMainBot extends NoeAbstractBot {
       case FIRE         -> stateFire();
       case REPOSITION   -> stateReposition();
       case DODGE        -> stateDodge();
-      case MOVE_SLALOM  -> stateMoveSlalom();
+      //case MOVE_SLALOM  -> stateMoveSlalom();
       case RADAR_MODE   -> stateRadarMode();
       case AVOID_OBSTACLE -> stateAvoidObstacle();
       case AVOID_DEAD_ZONE -> stateAvoidDeadZone();
@@ -87,6 +87,7 @@ public class NoeMainBot extends NoeAbstractBot {
       return;
     }
     if (isFrontObstacle()) {
+      targetAngle = normalizeAngle(getHeading() + Parameters.RIGHTTURNFULLANGLE);
       transitionTo(AVOID_OBSTACLE);
       return;
     }
@@ -96,15 +97,24 @@ public class NoeMainBot extends NoeAbstractBot {
 
   private void stateAvoidDeadZone() {
     if (!isInDeadZone(myX, myY)) {
-      transitionTo(previousState); // retour à l'état d'avant
+      transitionTo(previousState);
       return;
     }
-    double escapeAngle = safeAngle(getHeading(), STEP_SIZE);
-    if (!isAligned(escapeAngle, AIM_THRESHOLD * 2)) turnToward(escapeAngle);
-    else { move(); updatePosition(STEP_SIZE); }
+    if (!isAligned(targetAngle, AIM_THRESHOLD * 2)) {
+      turnToward(targetAngle);
+    } else if (!isFrontObstacle()) {
+      move();
+      updatePosition(STEP_SIZE);
+    } else {
+      targetAngle = computeEscapeAngle(STEP_SIZE);
+    }
   }
 
   private void stateAttackMode() {
+    if (isFrontObstacle()) {
+      transitionTo(AVOID_OBSTACLE);
+      return;
+    }
     if (!targetFound()) {
       lockedTarget = null;
       target.valid = false;
@@ -125,7 +135,7 @@ public class NoeMainBot extends NoeAbstractBot {
 
   private void stateRadarMode() {
   }
-
+/*
   private void stateMoveSlalom() {
     if (nearestEnemy != null) {
       lockedTarget = nearestEnemy;
@@ -134,7 +144,7 @@ public class NoeMainBot extends NoeAbstractBot {
       return;
     }
     stepCurvedMove(STEP_SIZE);
-  }
+  }*/
 
   private void stateIdleWatch() {
     if (nearestEnemy != null) {
@@ -155,7 +165,6 @@ public class NoeMainBot extends NoeAbstractBot {
   private void stateReposition() {
     if (myHp < LOW_HEALTH_RATIO) { transitionTo(DODGE); return; }
     if (repositionSteps <= 0) {
-      // Après repositionnement, retour attaque si cible encore valide
       transitionTo(targetFound() ? ATTACK_MODE : MOVE_FORWARD);
       return;
     }
@@ -178,9 +187,9 @@ public class NoeMainBot extends NoeAbstractBot {
   }
 
   private void stateAvoidObstacle() {
-    double targetAngle = normalizeAngle(getHeading() + Parameters.RIGHTTURNFULLANGLE);
     if (!isAligned(targetAngle, AIM_THRESHOLD * 2)) {
       turnToward(targetAngle);
+      return;
     }
     if (!isFrontObstacle()) {
       transitionTo(MOVE_FORWARD);
@@ -195,6 +204,8 @@ public class NoeMainBot extends NoeAbstractBot {
       repositionDir = (Math.random() < 0.5)
           ? Parameters.Direction.LEFT : Parameters.Direction.RIGHT;
     }
+    if (newState == AVOID_OBSTACLE) targetAngle = computeAvoidAngle();
+    if (newState == AVOID_DEAD_ZONE) targetAngle = computeEscapeAngle(STEP_SIZE);
     if (newState != AVOID_DEAD_ZONE) previousState = currentState;
     currentState = newState;
   }
@@ -215,7 +226,8 @@ public class NoeMainBot extends NoeAbstractBot {
     return targetFound() && currentState != ATTACK_MODE
       && currentState != FIRE
       && currentState != DODGE
-      && currentState != AVOID_DEAD_ZONE;
+      && currentState != AVOID_DEAD_ZONE
+      && currentState != AVOID_OBSTACLE;
   }
 
   private String id() {
