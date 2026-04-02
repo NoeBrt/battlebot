@@ -90,7 +90,8 @@ public abstract class NoeAbstractBot extends Brain {
     MOVE_SLALOM,
     RADAR_MODE,
     AVOID_OBSTACLE,
-    AVOID_DEAD_ZONE
+    AVOID_DEAD_ZONE,
+    APPROACH
   }
 
   protected static final int M1 = 0;
@@ -100,9 +101,11 @@ public abstract class NoeAbstractBot extends Brain {
   protected static final int S2 = 4;
 
   protected static final double ANGLEPRECISION = 0.001;
+  protected static final double MAIN_RADAR_RANGE = Parameters.teamASecondaryBotFrontalDetectionRange;
   protected static final double SECONDARY_RADAR_RANGE = Parameters.teamASecondaryBotFrontalDetectionRange;
   protected static final double FIRE_RANGE = Parameters.bulletRange;
   protected static final double BOT_RADIUS = Parameters.teamAMainBotRadius;
+
   protected final ArrayList<BotMessage> teamMessages = new ArrayList<>();
 
   protected double myX = 0;
@@ -130,8 +133,8 @@ public abstract class NoeAbstractBot extends Brain {
   protected State previousState;
   protected State currentState;
   protected boolean isTeamA;
+  protected boolean isMain;
   protected double targetAngle = 0;
-  protected boolean avoidRecalcDone = false;
 
   protected int curveN;
   protected int curveK;
@@ -177,8 +180,8 @@ public abstract class NoeAbstractBot extends Brain {
       if (Double.isNaN(bm.targetPos().getX()) || Double.isNaN(bm.targetPos().getY())) continue;
       // On met à jour uniquement si la cible alliée est plus fraîche que la nôtre
       if (nearestEnemy == null && (!target.valid || bm.targetAge() < target.age)) {
+        System.out.println("trouvé");
         target.update(bm.targetPos().getX(), bm.targetPos().getY());
-        // On simule l'âge reçu (le message a voyagé 1 tick)
         target.age = bm.targetAge() + 1;
       }
     }
@@ -261,18 +264,15 @@ public abstract class NoeAbstractBot extends Brain {
   }
 
   protected void scanAround() {
-    double minDist = SECONDARY_RADAR_RANGE;
+    double minDist = isMain ? MAIN_RADAR_RANGE : SECONDARY_RADAR_RANGE;
     nearestEnemy = null;
-
     for (IRadarResult r : detectRadar()) {
       if (isWreckedEnemy(r)) addWreckedEnnemies(r);
-
       if (isEnemy(r) && r.getObjectDistance() < minDist) {
         minDist = r.getObjectDistance();
         nearestEnemy = r;
       }
     }
-
     if (nearestEnemy != null) {
       double ex = myX + nearestEnemy.getObjectDistance() * Math.cos(nearestEnemy.getObjectDirection());
       double ey = myY + nearestEnemy.getObjectDistance() * Math.sin(nearestEnemy.getObjectDirection());

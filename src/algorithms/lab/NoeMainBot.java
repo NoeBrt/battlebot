@@ -11,15 +11,16 @@ public class NoeMainBot extends NoeAbstractBot {
   private static final double AIM_THRESHOLD    = 0.05;   // radians
   private static final double LOW_HEALTH_RATIO = 0.1;
   private static final double RADAR_RANGE = Parameters.teamAMainBotFrontalDetectionRange;
-  protected int role;
   private IRadarResult lockedTarget;
   private int dodgeSteps;
   private int repositionSteps;
-  private Parameters.Direction repositionDir;
+  private double lateralAngle;
+  private int fireCount = 0;
 
   @Override
   public void activate() {
     isTeamA = (getHeading() == Parameters.EAST);
+    isMain = true;
     boolean top = false, bottom = false;
     for (IRadarResult o : detectRadar()) {
       if (isSameDirection(o.getObjectDirection(), Parameters.NORTH)) top = true;
@@ -44,7 +45,6 @@ public class NoeMainBot extends NoeAbstractBot {
         y = isTeamA ? Parameters.teamAMainBot3InitY : Parameters.teamBMainBot3InitY;
       }
     }
-    //startCurvedMove(16, 1, Parameters.Direction.LEFT, true);
     initState(MOVE_FORWARD, x, y);
     sendLogMessage("[MainBot:" + id() + "] spawn=(" + myX + "," + myY + ")");
   }
@@ -82,7 +82,11 @@ public class NoeMainBot extends NoeAbstractBot {
   }
 
   private void stateMoveForward() {
-    if (nearestEnemy != null /*|| targetFound()*/) {
+    if (targetFound()) {
+      transitionTo(ATTACK_MODE);
+      return;
+    }
+    if (nearestEnemy != null) {
       lockedTarget = nearestEnemy;
       transitionTo(ATTACK_MODE);
       return;
@@ -111,14 +115,14 @@ public class NoeMainBot extends NoeAbstractBot {
   }
 
   private void stateAttackMode() {
-    /*if (isFrontObstacle()) {
+    if (isFrontObstacle()) {
       transitionTo(AVOID_OBSTACLE);
       return;
-    }*/
+    }
     if (!targetFound()) {
       lockedTarget = null;
       target.valid = false;
-      sendLogMessage("[MainBot:" + id() + "] cible perdue → MOVE_FORWARD");
+      sendLogMessage("[MainBot:" + id() + "] cible perdue -> MOVE_FORWARD");
       transitionTo(MOVE_FORWARD);
       return;
     }
@@ -134,8 +138,12 @@ public class NoeMainBot extends NoeAbstractBot {
       }
       return;
     }
+    if (fireCount <= 0){
+      transitionTo(REPOSITION);
+      return;
+    }
     fire(angle);
-    //transitionTo(REPOSITION); // bouge après chaque tir pour être imprévisible
+    fireCount--;
   }
 
   private void stateRadarMode() {
@@ -168,13 +176,11 @@ public class NoeMainBot extends NoeAbstractBot {
   }
 
   private void stateReposition() {
-    if (myHp < LOW_HEALTH_RATIO) { transitionTo(DODGE); return; }
+    //if (myHp < LOW_HEALTH_RATIO) { transitionTo(DODGE); return; }
     if (repositionSteps <= 0) {
       transitionTo(targetFound() ? ATTACK_MODE : MOVE_FORWARD);
       return;
     }
-    double lateralAngle = normalizeAngle(getHeading() + Math.PI / 2
-        * (repositionDir == Parameters.Direction.RIGHT ? 1 : -1));
     if (!isAligned(lateralAngle, AIM_THRESHOLD * 2)) {
       turnToward(lateralAngle);
     } else {
@@ -204,13 +210,16 @@ public class NoeMainBot extends NoeAbstractBot {
   }
 
   private void transitionTo(State newState) {
-    sendLogMessage("[MainBot:" + id() + "] " + currentState + " → " + newState);
+    sendLogMessage("[MainBot:" + id() + "] " + currentState + " -> " + newState);
     if (newState == DODGE) dodgeSteps = 5;
     if (newState == REPOSITION) {
-      repositionSteps = 3;
-      repositionDir = (Math.random() < 0.5)
-          ? Parameters.Direction.LEFT : Parameters.Direction.RIGHT;
+      Parameters.Direction repositionDir;
+      repositionSteps = 100;
+      repositionDir = Parameters.Direction.LEFT;
+      lateralAngle = normalizeAngle(angleTo(targetX(), targetY()) + Math.PI / 2
+        * (repositionDir == Parameters.Direction.RIGHT ? 1 : -1));
     }
+    if (newState == ATTACK_MODE) fireCount = Parameters.bulletFiringLatency * 10;
     if (newState == AVOID_OBSTACLE) targetAngle = computeAvoidAngle();
     if (newState == AVOID_DEAD_ZONE) targetAngle = computeEscapeAngle(STEP_SIZE);
     if (newState != AVOID_DEAD_ZONE) previousState = currentState;
