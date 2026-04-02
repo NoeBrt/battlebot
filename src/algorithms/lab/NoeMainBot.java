@@ -10,7 +10,7 @@ public class NoeMainBot extends NoeAbstractBot {
   private static final double STEP_SIZE        = Parameters.teamAMainBotSpeed;
   private static final double AIM_THRESHOLD    = 0.05;   // radians
   private static final double LOW_HEALTH_RATIO = 0.1;
-
+  private static final double RADAR_RANGE = Parameters.teamAMainBotFrontalDetectionRange;
   protected int role;
   private IRadarResult lockedTarget;
   private int dodgeSteps;
@@ -58,10 +58,11 @@ public class NoeMainBot extends NoeAbstractBot {
     broadcastStatus();
     if (isDead()) { transitionTo(RADAR_MODE); return; }
     mergeTeamTargets();
+    /*
     if (allyFoundATargetWhileBeingFree()) {
       transitionTo(ATTACK_MODE);
       return;
-    }/*
+    }
     if (isInDeadZone(myX, myY) && currentState != AVOID_DEAD_ZONE && currentState != AVOID_OBSTACLE) {
       transitionTo(AVOID_DEAD_ZONE);
       return;
@@ -81,13 +82,12 @@ public class NoeMainBot extends NoeAbstractBot {
   }
 
   private void stateMoveForward() {
-    if (nearestEnemy != null || targetFound()) {
+    if (nearestEnemy != null /*|| targetFound()*/) {
       lockedTarget = nearestEnemy;
       transitionTo(ATTACK_MODE);
       return;
     }
     if (isFrontObstacle()) {
-      targetAngle = normalizeAngle(getHeading() + Parameters.RIGHTTURNFULLANGLE);
       transitionTo(AVOID_OBSTACLE);
       return;
     }
@@ -111,10 +111,10 @@ public class NoeMainBot extends NoeAbstractBot {
   }
 
   private void stateAttackMode() {
-    if (isFrontObstacle()) {
+    /*if (isFrontObstacle()) {
       transitionTo(AVOID_OBSTACLE);
       return;
-    }
+    }*/
     if (!targetFound()) {
       lockedTarget = null;
       target.valid = false;
@@ -123,10 +123,15 @@ public class NoeMainBot extends NoeAbstractBot {
       return;
     }
     double dist = distanceTo(targetX(), targetY());
+    System.out.println(dist);
     double angle = angleTo(targetX(), targetY());
     if (dist > FIRE_RANGE) {
-      if (!isAligned(angle, AIM_THRESHOLD * 2)) turnToward(angle);
-      else { move(); updatePosition(STEP_SIZE); }
+      if (!isAligned(angle, AIM_THRESHOLD * 2)) {
+        turnToward(angle);
+      }
+      else {
+        move(); updatePosition(STEP_SIZE);
+      }
       return;
     }
     fire(angle);
@@ -193,6 +198,8 @@ public class NoeMainBot extends NoeAbstractBot {
     }
     if (!isFrontObstacle()) {
       transitionTo(MOVE_FORWARD);
+    } else {
+      targetAngle = computeAvoidAngle();
     }
   }
 

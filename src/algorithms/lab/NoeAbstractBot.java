@@ -23,7 +23,7 @@ public abstract class NoeAbstractBot extends Brain {
 
     public boolean isClose(Position p) {
       return Math.abs(x - p.x) < EPSILON &&
-        Math.abs(y - p.y) < EPSILON;
+          Math.abs(y - p.y) < EPSILON;
     }
 
     public double getX() {
@@ -102,7 +102,7 @@ public abstract class NoeAbstractBot extends Brain {
   protected static final double ANGLEPRECISION = 0.001;
   protected static final double SECONDARY_RADAR_RANGE = Parameters.teamASecondaryBotFrontalDetectionRange;
   protected static final double FIRE_RANGE = Parameters.bulletRange;
-
+  protected static final double BOT_RADIUS = Parameters.teamAMainBotRadius;
   protected final ArrayList<BotMessage> teamMessages = new ArrayList<>();
 
   protected double myX = 0;
@@ -155,7 +155,7 @@ public abstract class NoeAbstractBot extends Brain {
     target.tick();          // vieillit la cible à chaque tick
     receiveMessages();
     sendLogMessage("[Bot:" + myId + "] " + round2(myX) + "," + round2(myY)
-      + (target.valid ? " tgt=(" + round2(target.pos.getX()) + "," + round2(target.pos.getY()) + ") age=" + target.age : ""));
+        + (target.valid ? " tgt=(" + round2(target.pos.getX()) + "," + round2(target.pos.getY()) + ") age=" + target.age : ""));
     onStep();
   }
 
@@ -163,12 +163,12 @@ public abstract class NoeAbstractBot extends Brain {
 
   protected void broadcastStatus() {
     String msg = myId + ":" + currentState
-      + "|x:" + round2(myX)
-      + "|y:" + round2(myY)
-      + "|tx:" + (target.valid ? round2(target.pos.getX()) : "NaN")
-      + "|ty:" + (target.valid ? round2(target.pos.getY()) : "NaN")
-      + "|hp:" + round2(myHp)
-      + "|ta:" + (target.valid ? target.age : 9999);
+        + "|x:" + round2(myX)
+        + "|y:" + round2(myY)
+        + "|tx:" + (target.valid ? round2(target.pos.getX()) : "NaN")
+        + "|ty:" + (target.valid ? round2(target.pos.getY()) : "NaN")
+        + "|hp:" + round2(myHp)
+        + "|ta:" + (target.valid ? target.age : 9999);
     broadcast(msg);
   }
 
@@ -189,7 +189,7 @@ public abstract class NoeAbstractBot extends Brain {
     double ey = myY + enemy.getObjectDistance() * Math.sin(enemy.getObjectDirection());
     Position newPos = new Position(ex, ey);
     boolean alreadyKnown = wreckedEnemiesPos.stream()
-      .anyMatch(p -> p.isClose(newPos));
+        .anyMatch(p -> p.isClose(newPos));
     if (!alreadyKnown) {
       wreckedEnemiesPos.add(newPos);
     }
@@ -244,7 +244,20 @@ public abstract class NoeAbstractBot extends Brain {
   // ------------------------------------------------------------------ //
 
   protected boolean isFrontObstacle() {
-    return !(detectFront().getObjectType() == IFrontSensorResult.Types.NOTHING);
+    return detectFront().getObjectType() != IFrontSensorResult.Types.NOTHING;
+  }
+
+  protected IRadarResult myDetectFront(double range) {
+    double rightLimit = getHeading() + Parameters.RIGHTTURNFULLANGLE - Parameters.RIGHTTURNFULLANGLE / 6;
+    double leftLimit = getHeading() + Parameters.LEFTTURNFULLANGLE - Parameters.LEFTTURNFULLANGLE / 6;
+    for (IRadarResult rr : detectRadar()) {
+      double angularRadius = Math.asin(rr.getObjectRadius() / rr.getObjectDistance());
+      boolean inRange = rr.getObjectDistance() - rr.getObjectRadius() <= range;
+      boolean inDirection = rr.getObjectDirection() - angularRadius <= rightLimit
+          && rr.getObjectDirection() + angularRadius >= leftLimit;
+      if (inRange && inDirection) return rr;
+    }
+    return null;
   }
 
   protected void scanAround() {
@@ -269,7 +282,7 @@ public abstract class NoeAbstractBot extends Brain {
 
   protected boolean isEnemy(IRadarResult r) {
     return r.getObjectType() == IRadarResult.Types.OpponentMainBot
-      || r.getObjectType() == IRadarResult.Types.OpponentSecondaryBot;
+        || r.getObjectType() == IRadarResult.Types.OpponentSecondaryBot;
   }
 
   private boolean isWreckedEnemy(IRadarResult r) {
@@ -297,15 +310,15 @@ public abstract class NoeAbstractBot extends Brain {
     if (isInDeadZone(myX, myY)) {
       // On est déjà dedans → calculer la direction vers la sortie la plus proche
       Position nearest = wreckedEnemiesPos.stream()
-        .filter(w -> {
-          double dx = myX - w.getX(), dy = myY - w.getY();
-          return dx * dx + dy * dy < SECONDARY_RADAR_RANGE * SECONDARY_RADAR_RANGE;
-        })
-        .min(Comparator.comparingDouble(w -> {
-          double dx = myX - w.getX(), dy = myY - w.getY();
-          return dx * dx + dy * dy;
-        }))
-        .orElse(null);
+          .filter(w -> {
+            double dx = myX - w.getX(), dy = myY - w.getY();
+            return dx * dx + dy * dy < SECONDARY_RADAR_RANGE * SECONDARY_RADAR_RANGE;
+          })
+          .min(Comparator.comparingDouble(w -> {
+            double dx = myX - w.getX(), dy = myY - w.getY();
+            return dx * dx + dy * dy;
+          }))
+          .orElse(null);
 
       if (nearest != null) {
         // Angle qui s'éloigne de l'épave
@@ -330,23 +343,7 @@ public abstract class NoeAbstractBot extends Brain {
   }
 
   protected double computeAvoidAngle() {
-    double obstacleAngle = Double.NaN;
-    double minDist = Double.MAX_VALUE;
-    for (IRadarResult r : detectRadar()) {
-      double relAngle = normalizeAngle(r.getObjectDirection() - getHeading());
-      if (Math.abs(relAngle) < Math.PI / 2 && r.getObjectDistance() < minDist) {
-        minDist = r.getObjectDistance();
-        obstacleAngle = relAngle;
-      }
-    }
-    if (Double.isNaN(obstacleAngle)) {
-      return normalizeAngle(getHeading() + Parameters.RIGHTTURNFULLANGLE);
-    }
-    if (obstacleAngle < 0) {
-      return normalizeAngle(getHeading() + Parameters.RIGHTTURNFULLANGLE);
-    } else {
-      return normalizeAngle(getHeading() - Parameters.RIGHTTURNFULLANGLE);
-    }
+    return getHeading() + Parameters.RIGHTTURNFULLANGLE;
   }
 
   protected double computeEscapeAngle(double stepSize) {
@@ -425,7 +422,7 @@ public abstract class NoeAbstractBot extends Brain {
         curveMoving = true;
         if (curveAlternateState)
           curveTurnDir = (curveTurnDir == Parameters.Direction.RIGHT)
-            ? Parameters.Direction.LEFT : Parameters.Direction.RIGHT;
+              ? Parameters.Direction.LEFT : Parameters.Direction.RIGHT;
       }
     }
     return true;

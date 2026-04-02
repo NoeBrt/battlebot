@@ -9,6 +9,7 @@ public class NoeSecondaryBot extends NoeAbstractBot {
 
   private static final double STEP_SIZE     = Parameters.teamASecondaryBotSpeed;
   private static final double AIM_THRESHOLD = 0.05;
+  private static final double RADAR_RANGE = Parameters.teamASecondaryBotFrontalDetectionRange;
 
   protected int role;
 
@@ -30,7 +31,7 @@ public class NoeSecondaryBot extends NoeAbstractBot {
     }
     if (myId == S1) {
       startCurvedMove(3, 2, Parameters.Direction.LEFT, true);
-      initState(MOVE_SLALOM, x, y);
+      initState(MOVE_FORWARD, x, y);
     } else {
       initState(MOVE_FORWARD, x, y);
     }
@@ -43,8 +44,8 @@ public class NoeSecondaryBot extends NoeAbstractBot {
   @Override
   protected void onStep() {
     scanAround();
-    mergeTeamTargets();
     broadcastStatus();
+    mergeTeamTargets();
     if (isDead()) transitionTo(IDLE_WATCH);
     switch (currentState) {
       case MOVE_SLALOM  -> stateMoveSlalom();
@@ -59,7 +60,7 @@ public class NoeSecondaryBot extends NoeAbstractBot {
   }
 
   private void stateMoveForward() {
-    if (isFrontObstacle()) { transitionTo(MOVE_SLALOM); return; }
+    if (isFrontObstacle()) { transitionTo(IDLE_WATCH); return; }
     move();
     updatePosition(STEP_SIZE);
   }
