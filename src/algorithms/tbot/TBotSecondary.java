@@ -77,10 +77,12 @@ public class TBotSecondary extends TBotBase {
             executeBehavior(best, target);
         }
 
-        // Post-move fire
-        target = chooseTarget();
-        fired = tryFire(target);
-        if (fired) broadcastFocus(target);
+        // Post-move fire (skip if pre-move fired — cooldown prevents firing anyway)
+        if (!fired) {
+            target = chooseTarget();
+            fired = tryFire(target);
+            if (fired) broadcastFocus(target);
+        }
     }
 
     // ── Utility Scoring ───────────────────────────────────────────────────
@@ -96,14 +98,14 @@ public class TBotSecondary extends TBotBase {
     private double scoreAssassin(TEnemy target) {
         if (target == null) return 0;
         double score = 0;
-        // Check for low-HP enemies
+        double lowestHP = Double.MAX_VALUE;
         for (TEnemy e : enemies) {
             double hp = e.estimatedHP();
-            if (hp < TBotConfig.US_ASSASSIN_HP_THRESH && hp > 0) {
+            if (hp < TBotConfig.US_ASSASSIN_HP_THRESH && hp > 0 && hp < lowestHP) {
+                lowestHP = hp;
                 score = TBotConfig.US_ASSASSIN_BASE;
                 double dist = Math.hypot(e.x - myX, e.y - myY);
-                if (dist < 600) score += 0.3; // Close enough to chase
-                break;
+                if (dist < 600) score += 0.3;
             }
         }
         if (role == Role.ASSASSIN) score += 0.1;

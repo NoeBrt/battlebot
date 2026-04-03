@@ -45,6 +45,7 @@ public abstract class RLBotBase extends MacDuoBaseBot {
 
     protected List<RLEnemy> rlEnemies = new ArrayList<>();
     protected RLEnemy lastTarget = null;
+    protected String focusedTargetKey = null;
 
     @Override
     public void activate() {
@@ -67,7 +68,8 @@ public abstract class RLBotBase extends MacDuoBaseBot {
         
         currentTick++;
         sendMyPosition(); // Use helper from MacDuoBaseBot to broadcast position
-        detection(); 
+        detection();
+        pruneStaleEnemies();
         readMessages(); // Helper to process communication
     }
     
@@ -153,17 +155,13 @@ public abstract class RLBotBase extends MacDuoBaseBot {
     }
     
     private void updateRLEnemy(double x, double y, double d, double dir, Types type) {
-        boolean found = false;
         for (RLEnemy e : rlEnemies) {
-            if (Math.hypot(e.x - x, e.y - y) < 60) { 
+            if (e.type == type && Math.hypot(e.x - x, e.y - y) < 60) {
                 e.update(x, y, d, dir, currentTick);
-                found = true;
-                break;
+                return;
             }
         }
-        if (!found) {
-            rlEnemies.add(new RLEnemy(x, y, d, dir, type, currentTick));
-        }
+        rlEnemies.add(new RLEnemy(x, y, d, dir, type, currentTick));
     }
 
     @Override
@@ -183,7 +181,7 @@ public abstract class RLBotBase extends MacDuoBaseBot {
                 
                 boolean found = false;
                 for (RLEnemy e : rlEnemies) {
-                    if (Math.hypot(e.x - ox, e.y - oy) < 60) { 
+                    if (e.type == o.getObjectType() && Math.hypot(e.x - ox, e.y - oy) < 60) {
                         e.update(ox, oy, d, dir, currentTick);
                         found = true;
                         break;
@@ -205,25 +203,51 @@ public abstract class RLBotBase extends MacDuoBaseBot {
         }
     }
 
+    protected void pruneStaleEnemies() {
+        rlEnemies.removeIf(e -> (currentTick - e.lastSeenTick) > RLConfig.STALE_TTL);
+    }
+
+    private String enemyKey(RLEnemy e) {
+        int qx = (int)(e.x / 100.0);
+        int qy = (int)(e.y / 100.0);
+        return e.type.name() + "_" + qx + "_" + qy;
+    }
+
+    protected Double aimAndMaybeFire(RLEnemy target) {
+        if (target == null) return null;
+        double dist = Math.hypot(target.x - myPos.getX(), target.y - myPos.getY());
+        if (dist > Parameters.bulletRange) return null;
+
+        double t = dist / Parameters.bulletVelocity;
+        double predX = target.x + target.speedX * t;
+        double predY = target.y + target.speedY * t;
+
+        if (!isFiringLineSafe(predX, predY)) return null;
+
+        return Math.atan2(predY - myPos.getY(), predX - myPos.getX());
+    }
+
     protected RLEnemy chooseBestTarget() {
         RLEnemy best = null;
         double maxScore = -Double.MAX_VALUE;
 
         for (RLEnemy e : rlEnemies) {
+            int stale = currentTick - e.lastSeenTick;
+            if (stale > RLConfig.STALE_TTL) continue;
+
             double dist = Math.hypot(e.x - myPos.getX(), e.y - myPos.getY());
             double score = 0;
 
             score += (RLConfig.TARGET_PROXIMITY_WEIGHT - dist);
             if (e.type == Types.OpponentSecondaryBot) score += RLConfig.TARGET_TYPE_BONUS;
 
-            double hp = (e.type == Types.OpponentSecondaryBot ? 100 : 300) - e.estimatedDmg;
+            double hp = (e.type == Types.OpponentSecondaryBot ? RLConfig.MAX_HEALTH_SEC : RLConfig.MAX_HEALTH_MAIN) - e.estimatedDmg;
             if (hp < 30) score += RLConfig.TARGET_LOWHP_CRITICAL_BONUS;
             else if (hp < 60) score += RLConfig.TARGET_LOWHP_MODERATE_BONUS;
 
-            // Safe Fire (simplified check)
+            if (focusedTargetKey != null && focusedTargetKey.equals(enemyKey(e)))
+                score += RLConfig.TARGET_FOCUS_BONUS;
             if (isFiringLineSafe(e.x, e.y)) score += RLConfig.TARGET_SAFEFIRE_BONUS;
-
-            int stale = currentTick - e.lastSeenTick;
             score -= (stale * RLConfig.TARGET_STALE_PENALTY);
 
             if (score > maxScore) {
@@ -231,6 +255,8 @@ public abstract class RLBotBase extends MacDuoBaseBot {
                 best = e;
             }
         }
+
+        focusedTargetKey = (best != null) ? enemyKey(best) : null;
         return best;
     }
 
@@ -242,30 +268,30 @@ public abstract class RLBotBase extends MacDuoBaseBot {
         if (lenSq == 0) return true;
 
         for (BotState b : allyPos.values()) {
-            if (!b.isAlive() || (b.getPosition().getX() == x1 && b.getPosition().getY() == y1)) continue;
-            
+            if (!b.isAlive() || Math.hypot(b.getPosition().getX() - x1, b.getPosition().getY() - y1) < 1.0) continue;
+
             double bx = b.getPosition().getX();
             double by = b.getPosition().getY();
-            
+
             // Project point onto line segment (parameter t)
             double t = ((bx - x1) * dx + (by - y1) * dy) / lenSq;
-            
+
             // Check if projection falls within segment [0, 1]
             if (t < 0 || t > 1) continue;
-            
+
             // Distance from point to line
             double proX = x1 + t * dx;
             double proY = y1 + t * dy;
             double distSq = (bx - proX)*(bx - proX) + (by - proY)*(by - proY);
-            
-            // Check radius (approximate bot radius)
-            if (distSq < (40 * 40)) return false; // 40 distance check (30 radius + margin)
+
+            if (distSq < (RLConfig.FIRING_SAFETY_RADIUS * RLConfig.FIRING_SAFETY_RADIUS)) return false;
         }
         return true; 
     }
 
     protected void potentialFieldMove(double kiteMin, double kiteMax) {
         double fx = 0, fy = 0;
+        double swirlDir = teamA ? 1.0 : -1.0;
 
         // 1. Enemy Field
         for (RLEnemy e : rlEnemies) {
@@ -277,34 +303,35 @@ public abstract class RLBotBase extends MacDuoBaseBot {
             double force = 0;
             if (d < kiteMin) force = RLConfig.PF_ENEMY_REPEL_STRENGTH * (kiteMin - d) / 100.0;
             else if (d > kiteMax) force = -RLConfig.PF_ENEMY_ATTRACT_STRENGTH * (d - kiteMax) / 100.0;
-            
+
             fx += (dx/d) * force;
             fy += (dy/d) * force;
-            
-            // Tangential
-            fx += -(dy/d) * RLConfig.PF_TANGENTIAL_STRENGTH;
-            fy += (dx/d) * RLConfig.PF_TANGENTIAL_STRENGTH;
+
+            // Tangential (distance-scaled, team-aware swirl)
+            double tangentialScale = RLConfig.TANGENTIAL_SCALE_REF / Math.max(d, RLConfig.TANGENTIAL_MIN_DIST);
+            fx += -(dy/d) * RLConfig.PF_TANGENTIAL_STRENGTH * tangentialScale * swirlDir;
+            fy += (dx/d) * RLConfig.PF_TANGENTIAL_STRENGTH * tangentialScale * swirlDir;
         }
 
         // 2. Ally Repel
         for (BotState b : allyPos.values()) {
-             if (!b.isAlive() || (b.getPosition().getX() == myPos.getX() && b.getPosition().getY() == myPos.getY())) continue;
+             if (!b.isAlive() || Math.hypot(b.getPosition().getX() - myPos.getX(), b.getPosition().getY() - myPos.getY()) < 1.0) continue;
              double dx = myPos.getX() - b.getPosition().getX();
              double dy = myPos.getY() - b.getPosition().getY();
              double d = Math.hypot(dx, dy);
              if (d < RLConfig.PF_ALLY_REPEL_RANGE && d > 0) {
-                 double force = RLConfig.PF_ALLY_REPEL_STRENGTH * (RLConfig.PF_ALLY_REPEL_RANGE - d);
+                 double force = RLConfig.PF_ALLY_REPEL_STRENGTH * (RLConfig.PF_ALLY_REPEL_RANGE - d) / RLConfig.PF_ALLY_REPEL_RANGE;
                  fx += (dx/d) * force;
                  fy += (dy/d) * force;
              }
         }
 
         // 3. Wall Repel
-        double wallD = 200;
+        double wallD = RLConfig.WALL_MARGIN;
         if (myPos.getX() < wallD) fx += RLConfig.PF_WALL_STRENGTH * (wallD - myPos.getX());
-        if (myPos.getX() > 3000 - wallD) fx -= RLConfig.PF_WALL_STRENGTH * (myPos.getX() - (3000 - wallD));
+        if (myPos.getX() > RLConfig.MAP_WIDTH - wallD) fx -= RLConfig.PF_WALL_STRENGTH * (myPos.getX() - (RLConfig.MAP_WIDTH - wallD));
         if (myPos.getY() < wallD) fy += RLConfig.PF_WALL_STRENGTH * (wallD - myPos.getY());
-        if (myPos.getY() > 2000 - wallD) fy -= RLConfig.PF_WALL_STRENGTH * (myPos.getY() - (2000 - wallD));
+        if (myPos.getY() > RLConfig.MAP_HEIGHT - wallD) fy -= RLConfig.PF_WALL_STRENGTH * (myPos.getY() - (RLConfig.MAP_HEIGHT - wallD));
 
         // 4. Wreck Repel
         for (double[] w : wreckPositions) {
@@ -312,7 +339,7 @@ public abstract class RLBotBase extends MacDuoBaseBot {
             double dy = myPos.getY() - w[1];
             double d = Math.hypot(dx, dy);
             if (d < RLConfig.PF_WRECK_RANGE && d > 0) {
-                double force = RLConfig.PF_WALL_STRENGTH * (RLConfig.PF_WRECK_RANGE - d);
+                double force = RLConfig.PF_WALL_STRENGTH * (RLConfig.PF_WRECK_RANGE - d) / RLConfig.PF_WRECK_RANGE;
                 fx += (dx/d) * force;
                 fy += (dy/d) * force;
             }

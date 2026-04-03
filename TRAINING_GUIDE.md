@@ -312,9 +312,9 @@ Controls team-level communication and coordination.
 python3 train_tbot_tournament.py \
   --generations 40 \
   --pop 48 \
-  --sigma0 0.80 \
+  --sigma0 0.75 \
   --workers 8 \
-  --timeout 30000
+  --timeout 60000
 ```
 
 ### Resume from Checkpoint

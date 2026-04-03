@@ -102,10 +102,15 @@ public class TBotMain extends TBotBase {
             executeBehavior(best, target);
         }
 
-        // Post-move fire attempt (dual fire like MacDuoUltra)
-        target = chooseTarget();
-        fired = tryFire(target);
-        if (fired) broadcastFocus(target);
+        // Post-move fire attempt (skip if pre-move fired — cooldown prevents firing anyway)
+        if (!fired) {
+            target = chooseTarget();
+            fired = tryFire(target);
+            if (fired) {
+                broadcastFocus(target);
+                noFireTicks = 0;
+            }
+        }
     }
 
     // ── Utility Scoring ───────────────────────────────────────────────────
@@ -205,7 +210,6 @@ public class TBotMain extends TBotBase {
         flankX = Math.max(150, Math.min(MAP_W - 150, flankX));
         flankY = Math.max(150, Math.min(MAP_H - 150, flankY));
         goTo(flankX, flankY);
-        noFireTicks = 0;
     }
 
     private void executeRetreat() {
@@ -219,7 +223,7 @@ public class TBotMain extends TBotBase {
         if (aliveAllies >= TBotConfig.U_AGGRO_ALIVE_THRESH && getHealth() > TBotConfig.U_AGGRO_HP_THRESH) {
             kiteMin = TBotConfig.KITE_MIN_AGGRO;
             kiteMax = TBotConfig.KITE_MAX_AGGRO;
-        } else if (aliveAllies <= 2 || getHealth() < 100) {
+        } else if (aliveAllies <= 2 || getHealth() < TBotConfig.U_RETREAT_HP_THRESH) {
             kiteMin = TBotConfig.KITE_MIN_DEFEN;
             kiteMax = TBotConfig.KITE_MAX_DEFEN;
         } else {

@@ -17,11 +17,15 @@ public class AutoRecordingViewer {
     public static void main(String[] args) {
         try {
             long timeoutMs = 300000; // 5 minutes
+            int delayMs = 1;
             if (args.length > 0) {
                 timeoutMs = Long.parseLong(args[0]);
             }
+            if (args.length > 1) {
+                delayMs = Integer.parseInt(args[1]);
+            }
 
-            System.out.println("AutoRecordingViewer: launching...");
+            System.out.println("AutoRecordingViewer: launching with timeout=" + timeoutMs + "ms delay=" + delayMs + "ms");
 
             // 1. Launch Viewer (posts to EDT asynchronously)
             Viewer.main(new String[0]);
@@ -30,8 +34,8 @@ public class AutoRecordingViewer {
             Field framedGuiField = Viewer.class.getDeclaredField("framedGUI");
             framedGuiField.setAccessible(true);
             JFrame frame = null;
-            for (int i = 0; i < 50; i++) {
-                Thread.sleep(100);
+            for (int i = 0; i < 200; i++) {
+                Thread.sleep(10);
                 frame = (JFrame) framedGuiField.get(null);
                 if (frame != null) break;
             }
@@ -53,7 +57,7 @@ public class AutoRecordingViewer {
             SwingUtilities.invokeAndWait(() -> {
                 try { firstAction.invoke(mp); } catch (Exception e) { throw new RuntimeException(e); }
             });
-            Thread.sleep(300);
+            Thread.sleep(20);
 
             // 5. Press button 2: startSimulation() — start the engine
             Method startSim = MainPanel.class.getDeclaredMethod("startSimulation");
@@ -71,6 +75,16 @@ public class AutoRecordingViewer {
             engineField.setAccessible(true);
             SimulatorEngine engine = (SimulatorEngine) engineField.get(simPanel);
 
+            // Speed up the clock
+            Field gameClockField = SimulatorEngine.class.getDeclaredField("gameClock");
+            gameClockField.setAccessible(true);
+            Timer gameClock = (Timer) gameClockField.get(engine);
+            final int d = delayMs;
+            SwingUtilities.invokeAndWait(() -> {
+                gameClock.setDelay(d);
+                gameClock.setInitialDelay(d);
+            });
+
             System.out.println("Match started. Monitoring...");
 
             // 7. Monitor until one team is eliminated or timeout
@@ -79,7 +93,7 @@ public class AutoRecordingViewer {
             int teamBId = Integer.MIN_VALUE;
 
             while (System.currentTimeMillis() - start < timeoutMs) {
-                Thread.sleep(500);
+                Thread.sleep(50);
                 ArrayList<Bot> bots = engine.getBots();
                 if (bots == null || bots.isEmpty()) continue;
 

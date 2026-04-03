@@ -54,7 +54,9 @@ public abstract class TBotBase extends Brain {
     protected int    fireCooldown = 0;
     protected double focusX = Double.NaN;
     protected double focusY = Double.NaN;
+    protected int    focusTick = 0;
     protected TEnemy lastFiredTarget = null;
+    private List<IRadarResult> cachedRadar = Collections.emptyList();
 
     // ── Team stats (computed each tick) ───────────────────────────────────
     protected int    aliveMainCount;
@@ -157,11 +159,15 @@ public abstract class TBotBase extends Brain {
         scanRadar();
         readMessages();
         ageEnemies();
+        if (!Double.isNaN(focusX) && (tick - focusTick) > 30) {
+            focusX = Double.NaN; focusY = Double.NaN;
+        }
         updateTeamStats();
     }
 
     protected void scanRadar() {
-        for (IRadarResult o : detectRadar()) {
+        cachedRadar = new ArrayList<>(detectRadar());
+        for (IRadarResult o : cachedRadar) {
             double ox = myX + o.getObjectDistance() * Math.cos(o.getObjectDirection());
             double oy = myY + o.getObjectDistance() * Math.sin(o.getObjectDirection());
 
@@ -224,7 +230,7 @@ public abstract class TBotBase extends Brain {
                         if (p.length >= 3) addWreck(dbl(p[1]), dbl(p[2]));
                         break;
                     case "FOCUS":
-                        if (p.length >= 3) { focusX = dbl(p[1]); focusY = dbl(p[2]); }
+                        if (p.length >= 3) { focusX = dbl(p[1]); focusY = dbl(p[2]); focusTick = tick; }
                         break;
                     case "TRACK":
                         if (p.length >= 6) {
@@ -260,7 +266,7 @@ public abstract class TBotBase extends Brain {
 
     protected TEnemy upsertEnemy(double x, double y, double d, double dir, Types type) {
         for (double[] w : wrecks)
-            if (Math.hypot(x - w[0], y - w[1]) < 60.0) return null;
+            if (Math.hypot(x - w[0], y - w[1]) < 40.0) return null;
         for (TEnemy e : enemies)
             if (Math.hypot(x - e.x, y - e.y) < 80.0) { e.update(x, y, d, dir); return e; }
         TEnemy created = new TEnemy(x, y, d, dir, type);
@@ -279,7 +285,7 @@ public abstract class TBotBase extends Brain {
     protected void applyDmg(double x, double y, int dmg) {
         for (TEnemy e : enemies)
             if (Math.hypot(e.x - x, e.y - y) < 100.0) {
-                e.estimatedDmg = Math.max(e.estimatedDmg, dmg);
+                e.estimatedDmg = dmg;
                 return;
             }
     }
@@ -340,7 +346,7 @@ public abstract class TBotBase extends Brain {
     protected void broadcastFocus(TEnemy target) {
         if (target != null) {
             broadcast("FOCUS " + (int)target.x + " " + (int)target.y);
-            focusX = target.x; focusY = target.y;
+            focusX = target.x; focusY = target.y; focusTick = tick;
         }
     }
 
@@ -419,9 +425,10 @@ public abstract class TBotBase extends Brain {
      */
     protected TEnemy chooseTarget() {
         if (enemies.isEmpty()) return null;
-        TEnemy best = null;
-        double bestScore = -1e9;
+        TEnemy best1 = null, best2 = null;
+        double score1 = -1e9, score2 = -1e9;
 
+        // Phase 1: score all candidates WITHOUT expensive safe-fire check
         for (TEnemy e : enemies) {
             double d = Math.hypot(e.x - myX, e.y - myY);
             if (d > Parameters.bulletRange + 200) continue;
@@ -444,11 +451,18 @@ public abstract class TBotBase extends Brain {
 
             score -= e.stale * TBotConfig.TGT_STALE_PENALTY;
 
-            if (isSafeFire(computeLeadAngle(e))) score += TBotConfig.TGT_SAFEFIRE;
-
-            if (score > bestScore) { bestScore = score; best = e; }
+            if (score > score1) {
+                best2 = best1; score2 = score1;
+                best1 = e; score1 = score;
+            } else if (score > score2) {
+                best2 = e; score2 = score;
+            }
         }
-        return best;
+
+        // Phase 2: safe-fire check on top 2 candidates only (NR-7 intercept is expensive)
+        if (best1 != null && isSafeFire(computeLeadAngle(best1))) score1 += TBotConfig.TGT_SAFEFIRE;
+        if (best2 != null && isSafeFire(computeLeadAngle(best2))) score2 += TBotConfig.TGT_SAFEFIRE;
+        return (best2 != null && score2 > score1) ? best2 : best1;
     }
 
     // =====================================================================
@@ -609,7 +623,7 @@ public abstract class TBotBase extends Brain {
         savedH = normA(getHeading());
         boolean blockR = false, blockL = false;
 
-        for (IRadarResult o : detectRadar()) {
+        for (IRadarResult o : cachedRadar) {
             if (o.getObjectType() == Types.BULLET) continue;
             double cx = myX + o.getObjectDistance() * Math.cos(o.getObjectDirection());
             double cy = myY + o.getObjectDistance() * Math.sin(o.getObjectDirection());
@@ -689,7 +703,8 @@ public abstract class TBotBase extends Brain {
 
     protected double snapCardinal(double angle) {
         double na = normA(angle), best = 0.0, minD = Double.MAX_VALUE;
-        for (double c : new double[]{0, Math.PI / 2.0, Math.PI, 3.0 * Math.PI / 2.0}) {
+        for (double c : new double[]{0, Math.PI / 4.0, Math.PI / 2.0, 3.0 * Math.PI / 4.0,
+                                      Math.PI, 5.0 * Math.PI / 4.0, 3.0 * Math.PI / 2.0, 7.0 * Math.PI / 4.0}) {
             double d = aDist(na, c);
             if (d < minD) { minD = d; best = c; }
         }

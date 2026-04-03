@@ -422,12 +422,7 @@ public abstract class ClaudeUtils extends Brain {
                     double d = Math.hypot(ox - myX, oy - myY);
                     broadcast("ENEMY " + o.getObjectDirection() + " " + d
                               + " " + o.getObjectType() + " " + ox + " " + oy);
-                    TrackedEnemy e = upsertEnemy(ox, oy, d, o.getObjectDirection(), o.getObjectType());
-                    if (e != null && e.updateCount >= 2) {
-                        broadcast("TRACK " + (int)e.x + " " + (int)e.y + " "
-                                  + String.format(java.util.Locale.US, "%.2f", e.speedX) + " "
-                                  + String.format(java.util.Locale.US, "%.2f", e.speedY) + " " + o.getObjectType());
-                    }
+                    addOrUpdateEnemy(ox, oy, d, o.getObjectDirection(), o.getObjectType());
                     break;
                 }
                 case Wreck:
@@ -480,13 +475,6 @@ public abstract class ClaudeUtils extends Brain {
                         focusY = Double.parseDouble(p[2]);
                     }
                     break;
-                case "TRACK":
-                    if (p.length >= 6) {
-                        Types t = p[5].contains("Main") ? Types.OpponentMainBot : Types.OpponentSecondaryBot;
-                        applyTrackHint(Double.parseDouble(p[1]), Double.parseDouble(p[2]),
-                                Double.parseDouble(p[3]), Double.parseDouble(p[4]), t);
-                    }
-                    break;
                 default:
                     break;
             }
@@ -503,31 +491,16 @@ public abstract class ClaudeUtils extends Brain {
         }
     }
 
-    protected TrackedEnemy upsertEnemy(double x, double y, double d, double dir, Types type) {
+    protected void addOrUpdateEnemy(double x, double y, double d, double dir, Types type) {
         // Ignore if position matches a known wreck
         for (double[] w : wrecks)
-            if (Math.hypot(x - w[0], y - w[1]) < 60.0) return null;
+            if (Math.hypot(x - w[0], y - w[1]) < 60.0) return;
 
         // Update existing entry if close enough
         for (TrackedEnemy e : enemies) {
-            if (Math.hypot(x - e.x, y - e.y) < 80.0) { e.update(x, y, d, dir); return e; }
+            if (Math.hypot(x - e.x, y - e.y) < 80.0) { e.update(x, y, d, dir); return; }
         }
-        TrackedEnemy created = new TrackedEnemy(x, y, d, dir, type);
-        enemies.add(created);
-        return created;
-    }
-
-    protected void addOrUpdateEnemy(double x, double y, double d, double dir, Types type) {
-        upsertEnemy(x, y, d, dir, type);
-    }
-
-    protected void applyTrackHint(double x, double y, double vx, double vy, Types type) {
-        TrackedEnemy e = upsertEnemy(x, y, Math.hypot(x - myX, y - myY), Math.atan2(y - myY, x - myX), type);
-        if (e == null) return;
-        e.speedX = vx;
-        e.speedY = vy;
-        if (e.updateCount < 2) e.updateCount = 2;
-        e.stale = 0;
+        enemies.add(new TrackedEnemy(x, y, d, dir, type));
     }
 
     protected void addWreck(double wx, double wy) {

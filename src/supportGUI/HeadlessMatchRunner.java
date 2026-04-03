@@ -4,8 +4,6 @@ import robotsimulator.Bot;
 import robotsimulator.SimulatorEngine;
 import characteristics.Parameters;
 
-import characteristics.Parameters;
-
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.PrintStream;
@@ -33,23 +31,27 @@ public class HeadlessMatchRunner {
         int teamAId, teamBId;
     }
 
-    // Log stream: writes to file. Null if no log dir specified.
+    // Log stream: writes to file. Null in quiet mode or if no log dir specified.
     private static PrintStream log;
+    private static boolean quiet = false;
 
     public static void main(String[] args) throws Exception {
         int n = (args.length > 0) ? Integer.parseInt(args[0]) : 5;
         long timeoutMs = (args.length > 1) ? Long.parseLong(args[1]) : 90000L;
-        int delayMs = (args.length > 2) ? Integer.parseInt(args[2]) : 1;
+        int delayMs = (args.length > 2) ? Integer.parseInt(args[2]) : 0;
         String logDir = (args.length > 3) ? args[3] : "logs";
-        
 
-        // Setup log file
-        File logDirFile = new File(logDir);
-        logDirFile.mkdirs();
-        String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
-        File logFile = new File(logDirFile, "match_" + timestamp + ".log");
-        log = new PrintStream(new FileOutputStream(logFile), true);
-        System.out.println("Logging details to: " + logFile.getAbsolutePath());
+        quiet = System.getProperty("rl.quiet") != null;
+
+        // Setup log file (skip in quiet mode to reduce I/O)
+        if (!quiet) {
+            File logDirFile = new File(logDir);
+            logDirFile.mkdirs();
+            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+            File logFile = new File(logDirFile, "match_" + timestamp + ".log");
+            log = new PrintStream(new FileOutputStream(logFile), true);
+            System.out.println("Logging details to: " + logFile.getAbsolutePath());
+        }
         logBoth("=== Headless Match Run ===");
         logBoth(String.format("matches=%d timeout=%dms delay=%dms", n, timeoutMs, delayMs));
         logBoth(String.format("TeamA strategies: main=%s secondary=%s",
@@ -58,10 +60,6 @@ public class HeadlessMatchRunner {
         logBoth(String.format("TeamB strategies: main=%s secondary=%s",
                 Parameters.teamBMainBotBrainClassName,
                 Parameters.teamBSecondaryBotBrainClassName));
-        logBoth("Team A (" + Parameters.teamAName + "): Main=" + Parameters.teamAMainBotBrainClassName
-                + "  Secondary=" + Parameters.teamASecondaryBotBrainClassName);
-        logBoth("Team B (" + Parameters.teamBName + "): Main=" + Parameters.teamBMainBotBrainClassName
-                + "  Secondary=" + Parameters.teamBSecondaryBotBrainClassName);
 
         double[] diffs = new double[n];
         int winsA = 0, winsB = 0, draws = 0;
@@ -71,8 +69,8 @@ public class HeadlessMatchRunner {
         long sumTimeMs = 0;
 
         for (int i = 0; i < n; i++) {
-            System.out.printf(">>> Match %d/%d...", i + 1, n);
-            log.printf("%n>>> Starting match %d/%d...%n", i + 1, n);
+            if (!quiet) System.out.printf(">>> Match %d/%d...", i + 1, n);
+            if (log != null) log.printf("%n>>> Starting match %d/%d...%n", i + 1, n);
             MatchResult r = runOne(timeoutMs, delayMs);
             sumA += r.scoreA;
             sumB += r.scoreB;
@@ -89,10 +87,12 @@ public class HeadlessMatchRunner {
             sumTimeMs    += r.elapsedMs;
 
             String result = r.winA == 1 ? "A_WIN" : r.winB == 1 ? "B_WIN" : "DRAW";
-            // Console: concise one-liner
-            System.out.printf(" %s  A=%.3f B=%.3f  (%.1fs)%n", result, r.scoreA, r.scoreB, r.elapsedMs / 1000.0);
+            if (!quiet) {
+                // Console: concise one-liner
+                System.out.printf(" %s  A=%.3f B=%.3f  (%.1fs)%n", result, r.scoreA, r.scoreB, r.elapsedMs / 1000.0);
+            }
             // Log file: full details
-            log.printf("MATCH %d: elapsed=%dms scoreA=%.3f scoreB=%.3f hpA=%.3f hpB=%.3f deadA(main=%d,sec=%d) deadB(main=%d,sec=%d) result=%s%n",
+            if (log != null) log.printf("MATCH %d: elapsed=%dms scoreA=%.3f scoreB=%.3f hpA=%.3f hpB=%.3f deadA(main=%d,sec=%d) deadB(main=%d,sec=%d) result=%s%n",
                     i + 1, r.elapsedMs, r.scoreA, r.scoreB, r.hpRatioA, r.hpRatioB,
                     r.deadMainA, r.deadSecA, r.deadMainB, r.deadSecB, result);
         }
@@ -118,9 +118,12 @@ public class HeadlessMatchRunner {
                 sumHpA / n, sumHpB / n,
                 sumTimeMs / (double) n,
                 meanDiff, stdDiff);
-        logBoth(summary);
-        logBoth("Log saved: " + logFile.getAbsolutePath());
-        log.close();
+        // Summary always goes to stdout (Python parser reads it)
+        System.out.println(summary);
+        if (log != null) {
+            log.println(summary);
+            log.close();
+        }
 
         System.exit(0);
     }
@@ -145,8 +148,8 @@ public class HeadlessMatchRunner {
         Field framedGuiField = Viewer.class.getDeclaredField("framedGUI");
         framedGuiField.setAccessible(true);
         JFrame frame = null;
-        for (int wait = 0; wait < 50; wait++) {
-            Thread.sleep(100);
+        for (int wait = 0; wait < 200; wait++) {
+            Thread.sleep(10);
             frame = (JFrame) framedGuiField.get(null);
             if (frame != null) break;
         }
@@ -174,7 +177,7 @@ public class HeadlessMatchRunner {
         });
 
         // Small pause to let the panel switch settle
-        Thread.sleep(200);
+        Thread.sleep(2);
 
         // Button 2: MainPanel.startSimulation() — actually starts the engine
         Method startSimMethod = MainPanel.class.getDeclaredMethod("startSimulation");
@@ -210,7 +213,7 @@ public class HeadlessMatchRunner {
         long lastPrint = 0;
 
         while (System.currentTimeMillis() - start < timeoutMs) {
-            Thread.sleep(50);
+            Thread.sleep(1);
             ArrayList<Bot> bots = engine.getBots();
             if (bots == null || bots.isEmpty()) continue;
 
@@ -222,19 +225,21 @@ public class HeadlessMatchRunner {
             }
             if (teamAId == Integer.MIN_VALUE || teamBId == Integer.MIN_VALUE) continue;
 
-            // Log bot states every 2s (to file only)
-            long elapsed = System.currentTimeMillis() - start;
-            if (elapsed - lastPrint > 2000) {
-                lastPrint = elapsed;
-                logOnly(String.format("--- T=%dms ---", elapsed));
-                for (Bot b : bots) {
-                    String team = (b.getTeam() == teamAId) ? "A" : "B";
-                    boolean isMain = b.getMaxHealth() > 150.0;
-                    String role = isMain ? "Main" : "Sec";
-                    String status = b.isDestroyed() ? "DEAD"
-                            : String.format("HP=%.0f/%.0f", b.getHealth(), b.getMaxHealth());
-                    logOnly(String.format("  %s-%s: %s at (%.0f, %.0f) heading=%.2f",
-                            team, role, status, b.getX(), b.getY(), b.getHeading()));
+            // Log bot states every 2s (to file only, skip in quiet mode)
+            if (!quiet) {
+                long elapsed = System.currentTimeMillis() - start;
+                if (elapsed - lastPrint > 2000) {
+                    lastPrint = elapsed;
+                    logOnly(String.format("--- T=%dms ---", elapsed));
+                    for (Bot b : bots) {
+                        String team = (b.getTeam() == teamAId) ? "A" : "B";
+                        boolean isMain = b.getMaxHealth() > 150.0;
+                        String role = isMain ? "Main" : "Sec";
+                        String status = b.isDestroyed() ? "DEAD"
+                                : String.format("HP=%.0f/%.0f", b.getHealth(), b.getMaxHealth());
+                        logOnly(String.format("  %s-%s: %s at (%.0f, %.0f) heading=%.2f",
+                                team, role, status, b.getX(), b.getY(), b.getHeading()));
+                    }
                 }
             }
 

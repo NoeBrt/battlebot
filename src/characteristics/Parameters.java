@@ -21,8 +21,8 @@ public class Parameters {
   //-----------------------//
   //---TEAM-A-PARAMETERS---//
   //-----------------------//
-  public static final String teamAName = "RLBestBot";
-  public static final String teamAMainBotBrainClassName = "algorithms.tbot.TBotMain"; //class given by name; is supposed to extends robotsimulator.Brain
+  public static String teamAName = "RLBestBot";
+  public static String teamAMainBotBrainClassName = "algorithms.tbot.TBotMain"; //class given by name; is supposed to extends robotsimulator.Brain
   public static final String teamAMainBotAvatar = "avatars/cyclope.png"; //path relative to location of ant build.xml file
   public static final double teamAMainBotRadius = 50, //1 unit = 1mm, body radius
           teamAMainBotFrontalDetectionRange = 300, //1 unit = 1mm, range of frontal sensor
@@ -40,7 +40,7 @@ public class Parameters {
           teamAMainBot3InitY = 1200, //1 unit = 1mm, coordinate of central point
           teamAMainBot3InitHeading = EAST; //clockwise trigonometric unit, according to screen pixel coordinate reference
 
-  public static final String teamASecondaryBotBrainClassName = "algorithms.tbot.TBotSecondary"; //class given by name; is supposed to extends robotsimulator.Brain
+  public static String teamASecondaryBotBrainClassName = "algorithms.tbot.TBotSecondary"; //class given by name; is supposed to extends robotsimulator.Brain
   public static final String teamASecondaryBotAvatar = "avatars/clumpsy.png"; //path relative to location of ant build.xml file
   public static final double teamASecondaryBotRadius = 50, //1 unit = 1mm, body radius
           teamASecondaryBotFrontalDetectionRange = 500, //1 unit = 1mm, range of frontal sensor
@@ -58,8 +58,8 @@ public class Parameters {
   //-----------------------//
   //---TEAM-B-PARAMETERS---//
   //-----------------------//
-  public static final String teamBName = "Claude";
-  public static final String teamBMainBotBrainClassName = "algorithms.external.MacDuoMain"; //class given by name; is supposed to extends robotsimulator.Brain
+  public static String teamBName = "Stage8";
+  public static String teamBMainBotBrainClassName = "algorithms.external.Stage8MainA"; //class given by name; is supposed to extends robotsimulator.Brain
   public static final String teamBMainBotAvatar = "avatars/hollowee.png"; //path relative to location of ant build.xml file
   public static final double teamBMainBotRadius = 50, //1 unit = 1mm, body radius
           teamBMainBotFrontalDetectionRange = 300, //1 unit = 1mm, range of frontal sensor
@@ -77,7 +77,7 @@ public class Parameters {
           teamBMainBot3InitY = 1200, //1 unit = 1mm, coordinate of central point
           teamBMainBot3InitHeading = WEST; //clockwise trigonometric unit, according to screen pixel coordinate reference
 
-  public static final String teamBSecondaryBotBrainClassName = "algorithms.external.MacDuoSecondary"; //class given by name; is supposed to extends robotsimulator.Brain
+  public static String teamBSecondaryBotBrainClassName = "algorithms.external.Stage8SecondaryA"; //class given by name; is supposed to extends robotsimulator.Brain
   public static final String teamBSecondaryBotAvatar = "avatars/fannyExplorer.png"; //path relative to location of ant build.xml file
   public static final double teamBSecondaryBotRadius = 50, //1 unit = 1mm, body radius
           teamBSecondaryBotFrontalDetectionRange = 500, //1 unit = 1mm, range of frontal sensor
@@ -100,4 +100,17 @@ public class Parameters {
           bulletRadius=5,
           bulletRange=1000;
   public static final int bulletFiringLatency=20;
+
+  //-------------------------------//
+  //---RUNTIME-TEAM-OVERRIDES------//
+  //-------------------------------//
+  static {
+    String v;
+    if ((v = System.getProperty("team.a.name")) != null) teamAName = v;
+    if ((v = System.getProperty("team.a.main")) != null) teamAMainBotBrainClassName = v;
+    if ((v = System.getProperty("team.a.sec"))  != null) teamASecondaryBotBrainClassName = v;
+    if ((v = System.getProperty("team.b.name")) != null) teamBName = v;
+    if ((v = System.getProperty("team.b.main")) != null) teamBMainBotBrainClassName = v;
+    if ((v = System.getProperty("team.b.sec"))  != null) teamBSecondaryBotBrainClassName = v;
+  }
 }

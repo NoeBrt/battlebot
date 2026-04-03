@@ -77,7 +77,7 @@ public class RLBotMain extends RLBotBase {
         boolean hasEnemies = !rlEnemies.isEmpty();
         
         if (mainState != S.DEAD) {
-             if (getHealth() < RLConfig.HP_RETREAT_MAIN && !hasEnemies) {
+             if (getHealth() < RLConfig.HP_RETREAT_MAIN) {
                  mainState = S.RETREATING;
              } else if (hasEnemies) {
                  mainState = (noFireTicks > RLConfig.NOFIRE_REPOSITION_TICKS) ? S.FLANKING : S.FIRING;
@@ -86,21 +86,8 @@ public class RLBotMain extends RLBotBase {
              }
         }
 
-        Double fireAngle = null;
         RLEnemy target = chooseBestTarget();
-        if (target != null) {
-            double dist = Math.hypot(target.x - myPos.getX(), target.y - myPos.getY());
-            if (dist <= Parameters.bulletRange) {
-                double t = dist / Parameters.bulletVelocity;
-                double predX = target.x + target.speedX * t;
-                double predY = target.y + target.speedY * t;
-                double tempAngle = Math.atan2(predY - myPos.getY(), predX - myPos.getX());
-
-                if (isFiringLineSafe(predX, predY)) {
-                    fireAngle = tempAngle;
-                }
-            }
-        }
+        Double fireAngle = aimAndMaybeFire(target);
 
         // 1 action per tick! Prioritize firing if possible
         if (fireAngle != null && noFireTicks > 2) {
@@ -123,7 +110,9 @@ public class RLBotMain extends RLBotBase {
                 double flankY = myPos.getY() + (MAIN1.equals(whoAmI) ? -RLConfig.FLANK_OFFSET : RLConfig.FLANK_OFFSET);
                 if (flankY < RLConfig.WALL_MARGIN) flankY = RLConfig.WALL_MARGIN;
                 if (flankY > RLConfig.MAP_HEIGHT - RLConfig.WALL_MARGIN) flankY = RLConfig.MAP_HEIGHT - RLConfig.WALL_MARGIN;
-                goTo(myPos.getX(), flankY);
+                double flankX = myPos.getX() + (teamA ? RLConfig.FLANK_OFFSET * 0.5 : -RLConfig.FLANK_OFFSET * 0.5);
+                flankX = Math.max(RLConfig.WALL_MARGIN, Math.min(RLConfig.MAP_WIDTH - RLConfig.WALL_MARGIN, flankX));
+                goTo(flankX, flankY);
                 break;
             case RETREATING:
                 goTo(teamA ? 300 : 2700, holdY);

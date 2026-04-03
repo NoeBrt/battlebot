@@ -43,21 +43,8 @@ public class RLBotSecondary extends RLBotBase {
             return;
         }
 
-        Double fireAngle = null;
         RLEnemy target = chooseBestTarget();
-        if (target != null) {
-             double dist = Math.hypot(target.x - myPos.getX(), target.y - myPos.getY());
-             if (dist <= Parameters.bulletRange) {
-                 double t = dist / Parameters.bulletVelocity;
-                 double predX = target.x + target.speedX * t;
-                 double predY = target.y + target.speedY * t;
-                 double tempAngle = Math.atan2(predY - myPos.getY(), predX - myPos.getX());
-
-                 if (isFiringLineSafe(predX, predY)) {
-                     fireAngle = tempAngle;
-                 }
-             }
-        }
+        Double fireAngle = aimAndMaybeFire(target);
         
         if (fireAngle != null) {
             fire(fireAngle);
@@ -81,7 +68,7 @@ public class RLBotSecondary extends RLBotBase {
         if (secState != S.DEAD) {
             if (getHealth() < RLConfig.MAX_HEALTH_SEC * RLConfig.HP_RETREAT_PCT_SEC && rlEnemies.isEmpty()) {
                 secState = S.RETREAT;
-            } else if (target != null && target.distance < 800) {
+            } else if (target != null && Math.hypot(target.x - myPos.getX(), target.y - myPos.getY()) < 800) {
                 secState = S.HUNT;
             } else if (hasMain) {
                 secState = S.FOLLOW;
@@ -104,11 +91,7 @@ public class RLBotSecondary extends RLBotBase {
                  double targetX = teamA ? RLConfig.ADVANCE_X_A : RLConfig.MAP_WIDTH - RLConfig.ADVANCE_X_A;
                  double targetY;
                  
-                 if (getHealth() > 0) {
-                     targetY = holdY > RLConfig.MAP_CY ? RLConfig.MAP_HEIGHT - RLConfig.FLANK_Y_OFFSET : RLConfig.FLANK_Y_OFFSET;
-                 } else {
-                     targetY = RLConfig.MAP_HEIGHT - RLConfig.FLANK_Y_OFFSET;
-                 }
+                 targetY = holdY > RLConfig.MAP_CY ? RLConfig.MAP_HEIGHT - RLConfig.FLANK_Y_OFFSET : RLConfig.FLANK_Y_OFFSET;
                  
                  double d = Math.hypot(targetX - myPos.getX(), targetY - myPos.getY());
                  if (d < RLConfig.PATROL_THRESHOLD) {

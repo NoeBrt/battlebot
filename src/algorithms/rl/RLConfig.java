@@ -56,6 +56,9 @@ public class RLConfig {
     public static final double HEALTH_LOW_THRESHOLD = 100.0;
     public static final double PATROL_THRESHOLD = 200.0;
     public static final double FIRING_ANGLE_TOLERANCE = 0.2;
+    public static final double FIRING_SAFETY_RADIUS = 55.0; // 50 bot radius + 5 bullet radius
+    public static final double TANGENTIAL_SCALE_REF = 100.0;
+    public static final double TANGENTIAL_MIN_DIST = 80.0;
     public static final double MAX_HEALTH_MAIN = 300.0;
     public static final double MAX_HEALTH_SEC = 100.0;
 

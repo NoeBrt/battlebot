@@ -86,6 +86,9 @@ FIXED_CONSTANTS = {
     "HEALTH_LOW_THRESHOLD": 100.0,
     "PATROL_THRESHOLD": 200.0,
     "FIRING_ANGLE_TOLERANCE": 0.2,
+    "FIRING_SAFETY_RADIUS": 55.0,
+    "TANGENTIAL_SCALE_REF": 100.0,
+    "TANGENTIAL_MIN_DIST": 80.0,
     "MAX_HEALTH_MAIN": 300.0,
     "MAX_HEALTH_SEC": 100.0,
 }
@@ -103,15 +106,11 @@ TEAM_TOTAL_HP = 1100.0
 
 
 TOURNAMENT_OPPONENTS = [
-    {"name": "MacDuo", "main": "algorithms.external.MacDuoMain", "sec": "algorithms.external.MacDuoSecondary", "weight": 5.0},
-    {"name": "Himself", "main": "algorithms.rlb.RLBotMainB", "sec": "algorithms.rlb.RLBotSecondaryB", "weight": 3.0},
-    {"name": "Stage8", "main": "algorithms.external.Stage8MainA", "sec": "algorithms.external.Stage8SecondaryA", "weight": 2.5},
-    {"name": "MecaMouse", "main": "algorithms.external.MecaMouseMain", "sec": "algorithms.external.MecaMouseSecondary", "weight": 2.0},
+    {"name": "Yomi",      "main": "algorithms.YomiMain",                "sec": "algorithms.YomiSecondary",                "weight": 5.0},
+    {"name": "MacDuo",    "main": "algorithms.external.MacDuoMain",     "sec": "algorithms.external.MacDuoSecondary",     "weight": 4.0},
+    {"name": "NoeBot",    "main": "algorithms.lab.NoeMainBot",          "sec": "algorithms.lab.NoeSecondaryBot",          "weight": 2.0},
     {"name": "Superhero", "main": "algorithms.external.SuperheroAMain", "sec": "algorithms.external.SuperheroASecondary", "weight": 1.5},
-    {"name": "FifthElem", "main": "algorithms.external.FifthElementMain", "sec": "algorithms.external.FifthElementSecondary", "weight": 1.5},
-    {"name": "Claude", "main": "algorithms.LLMS.ClaudeMain", "sec": "algorithms.LLMS.ClaudeSecondary", "weight": 1.0},
-    {"name": "AdaptiveK", "main": "algorithms.LLMS.AdaptiveKiteMain", "sec": "algorithms.LLMS.AdaptiveKiteSecondary", "weight": 1.0},
-    {"name": "Team1", "main": "algorithms.external.teamMain", "sec": "algorithms.external.teamSecondary", "weight": 1.0}
+    {"name": "AdaptiveK", "main": "algorithms.LLMS.AdaptiveKiteMain",   "sec": "algorithms.LLMS.AdaptiveKiteSecondary",   "weight": 1.0},
 ]
 
 def normalize(real_params: np.ndarray) -> np.ndarray:
@@ -200,7 +199,7 @@ def patch_parameters_for_duel(worker_dir: Path, opp_main: str, opp_sec: str):
     )
     txt = re.sub(
         r'teamASecondaryBotBrainClassName\s*=\s*".*?";',
-        'teamASecondaryBotBrainClassName = "algorithms.rla.RLBotMainA";',
+        'teamASecondaryBotBrainClassName = "algorithms.rla.RLBotSecondaryA";',
         txt,
     )
     txt = re.sub(
@@ -211,6 +210,36 @@ def patch_parameters_for_duel(worker_dir: Path, opp_main: str, opp_sec: str):
     txt = re.sub(
         r'teamBSecondaryBotBrainClassName\s*=\s*".*?";',
         f'teamBSecondaryBotBrainClassName = "{opp_sec}";',
+        txt,
+    )
+    p.write_text(txt)
+
+
+def patch_parameters_for_duel_reverse(worker_dir: Path, opp_main: str, opp_sec: str):
+    """Place opponent as Team A, RLBot candidate (rlb) as Team B."""
+    p = worker_dir / "src" / "characteristics" / "Parameters.java"
+    if not p.exists():
+        return
+    txt = p.read_text()
+
+    txt = re.sub(
+        r'teamAMainBotBrainClassName\s*=\s*".*?";',
+        f'teamAMainBotBrainClassName = "{opp_main}";',
+        txt,
+    )
+    txt = re.sub(
+        r'teamASecondaryBotBrainClassName\s*=\s*".*?";',
+        f'teamASecondaryBotBrainClassName = "{opp_sec}";',
+        txt,
+    )
+    txt = re.sub(
+        r'teamBMainBotBrainClassName\s*=\s*".*?";',
+        'teamBMainBotBrainClassName = "algorithms.rlb.RLBotMainB";',
+        txt,
+    )
+    txt = re.sub(
+        r'teamBSecondaryBotBrainClassName\s*=\s*".*?";',
+        'teamBSecondaryBotBrainClassName = "algorithms.rlb.RLBotSecondaryB";',
         txt,
     )
     p.write_text(txt)
@@ -238,7 +267,7 @@ def compile_java(work_dir: Path) -> bool:
             "javac",
             "-cp", f"{jars_dir}/*",
             "-d", str(beans_dir),
-            "--release", "11",
+            "--release", "17",
             f"@{sources_file}",
         ],
         capture_output=True,
@@ -298,6 +327,7 @@ def parse_match_output(output: str) -> dict:
         "scoreA": 0.0,
         "scoreB": 0.0,
         "winRateA": 0.0,
+        "winRateB": 0.0,
         "avgDeadMainA": 0.0,
         "avgDeadSecA": 0.0,
         "avgDeadMainB": 0.0,
@@ -319,6 +349,10 @@ def parse_match_output(output: str) -> dict:
     m = re.search(r"winRateA=([\d.]+)", output)
     if m:
         result["winRateA"] = float(m.group(1))
+
+    m = re.search(r"winRateB=([\d.]+)", output)
+    if m:
+        result["winRateB"] = float(m.group(1))
 
     m = re.search(r"avgDeadMainA=([\d.]+)\s+avgDeadSecA=([\d.]+)", output)
     if m:
@@ -380,6 +414,22 @@ def compute_fitness(result: dict) -> float:
     return float(fitness)
 
 
+def compute_fitness_as_B(result: dict) -> float:
+    """Compute fitness when RLBot is playing as Team B. Swaps A/B values."""
+    swapped = {
+        "scoreA": float(result.get("scoreB", 0.0)),
+        "scoreB": float(result.get("scoreA", 0.0)),
+        "winRateA": float(result.get("winRateB", 0.0)),
+        "avgDeadMainA": float(result.get("avgDeadMainB", 0.0)),
+        "avgDeadSecA": float(result.get("avgDeadSecB", 0.0)),
+        "avgDeadMainB": float(result.get("avgDeadMainA", 0.0)),
+        "avgDeadSecB": float(result.get("avgDeadSecA", 0.0)),
+        "avgHpA": float(result.get("avgHpB", 0.0)),
+        "avgHpB": float(result.get("avgHpA", 0.0)),
+    }
+    return compute_fitness(swapped)
+
+
 # -----------------------------------------------------------------------------
 # WORKER SETUP / EVALUATION
 # -----------------------------------------------------------------------------
@@ -407,49 +457,63 @@ def setup_worker(worker_id: int | str) -> Path:
 
 
 def evaluate_candidate(args):
-    candidate_idx, worker_id, norm_a, norm_prev, n_matches, timeout_ms = args
+    candidate_idx, worker_id, norm_a, n_matches, timeout_ms = args
     import uuid, shutil
     unique_worker_id = f"{worker_id}_{uuid.uuid4().hex[:8]}"
     worker_dir = setup_worker(unique_worker_id)
 
     try:
         real_a = denormalize(norm_a)
-        real_prev = denormalize(norm_prev)
-        
+
+        # Build both rla and rlb with the SAME candidate params (dual-side eval)
         build_team_sources(worker_dir, team_pkg="rla", suffix="A", config_class="RLConfigA")
         generate_rlconfig_java(real_a, worker_dir / "src" / "algorithms" / "rla" / "RLConfigA.java", "RLConfigA", "algorithms.rla")
 
         build_team_sources(worker_dir, team_pkg="rlb", suffix="B", config_class="RLConfigB")
-        generate_rlconfig_java(real_prev, worker_dir / "src" / "algorithms" / "rlb" / "RLConfigB.java", "RLConfigB", "algorithms.rlb")
-        
+        generate_rlconfig_java(real_a, worker_dir / "src" / "algorithms" / "rlb" / "RLConfigB.java", "RLConfigB", "algorithms.rlb")
+
         if not compile_java(worker_dir):
             return candidate_idx, -10.0, {"error": "compile_failed"}
 
         total_fitness = 0.0
         total_weight = 0.0
         results_agg = {"winRateA": 0.0, "scoreA": 0.0, "scoreB": 0.0, "avgHpA": 0.0, "avgHpB": 0.0, "per_opp": {}}
-        
+
         for opp in TOURNAMENT_OPPONENTS:
+            # --- Side A: RLBot as Team A, opponent as Team B ---
             patch_parameters_for_duel(worker_dir, opp["main"], opp["sec"])
-            
-            # Need to recompile just Parameters.java
             if not compile_java(worker_dir): continue
-            
-            res = run_match(worker_dir, n_matches=n_matches, timeout_ms=timeout_ms)
-            if res.get("error"):
-                continue
-                
-            match_fit = compute_fitness(res)
+
+            res_a = run_match(worker_dir, n_matches=n_matches, timeout_ms=timeout_ms)
+            fit_a = compute_fitness(res_a) if not res_a.get("error") else -5.0
+            win_a = res_a.get("winRateA", 0.0) if not res_a.get("error") else 0.0
+
+            # --- Side B: opponent as Team A, RLBot as Team B ---
+            patch_parameters_for_duel_reverse(worker_dir, opp["main"], opp["sec"])
+            if not compile_java(worker_dir): continue
+
+            res_b = run_match(worker_dir, n_matches=n_matches, timeout_ms=timeout_ms)
+            fit_b = compute_fitness_as_B(res_b) if not res_b.get("error") else -5.0
+            win_b = res_b.get("winRateB", 0.0) if not res_b.get("error") else 0.0
+
+            # Average both sides
+            match_fit = (fit_a + fit_b) / 2.0
+            match_win = (win_a + win_b) / 2.0
+
             w = opp["weight"]
             total_fitness += match_fit * w
             total_weight += w
-            
-            results_agg["per_opp"][opp["name"]] = {"fit": match_fit, "win": res.get("winRateA", 0.0)}
-            results_agg["winRateA"] += res.get("winRateA", 0.0) * w
-            results_agg["scoreA"] += res.get("scoreA", 0.0) * w
-            results_agg["scoreB"] += res.get("scoreB", 0.0) * w
-            results_agg["avgHpA"] += res.get("avgHpA", 0.0) * w
-            results_agg["avgHpB"] += res.get("avgHpB", 0.0) * w
+
+            results_agg["per_opp"][opp["name"]] = {
+                "fit": match_fit, "win": match_win,
+                "fit_A": fit_a, "fit_B": fit_b,
+                "win_A": win_a, "win_B": win_b,
+            }
+            results_agg["winRateA"] += match_win * w
+            results_agg["scoreA"] += ((res_a.get("scoreA", 0.0) + res_b.get("scoreB", 0.0)) / 2.0) * w
+            results_agg["scoreB"] += ((res_a.get("scoreB", 0.0) + res_b.get("scoreA", 0.0)) / 2.0) * w
+            results_agg["avgHpA"] += ((res_a.get("avgHpA", 0.0) + res_b.get("avgHpB", 0.0)) / 2.0) * w
+            results_agg["avgHpB"] += ((res_a.get("avgHpB", 0.0) + res_b.get("avgHpA", 0.0)) / 2.0) * w
 
         if total_weight > 0:
             final_fit = total_fitness / total_weight
@@ -467,8 +531,8 @@ def evaluate_candidate(args):
             shutil.rmtree(worker_dir, ignore_errors=True)
 
 
-def reevaluate_params(norm_a: np.ndarray, norm_prev: np.ndarray, worker_id: str, n_matches: int, timeout_ms: int):
-    _, fitness, result = evaluate_candidate((-1, worker_id, norm_a, norm_prev, n_matches, timeout_ms))
+def reevaluate_params(norm_a: np.ndarray, worker_id: str, n_matches: int, timeout_ms: int):
+    _, fitness, result = evaluate_candidate((-1, worker_id, norm_a, n_matches, timeout_ms))
     return fitness, result
 
 
@@ -601,8 +665,8 @@ def train(args):
         np.random.seed(args.seed)
 
     print("=" * 70)
-    print("  CMA-ES trainer for Simovie Battlebot")
-    print("  Tournament mode: Team A vs Multiple Opponents + Himself")
+    print("  CMA-ES trainer for Simovie Battlebot (RLBot)")
+    print("  Tournament mode: Dual-side evaluation (Team A + Team B)")
     print("=" * 70)
 
     results_dir = RL_DIR / "rl_results"
@@ -645,7 +709,7 @@ def train(args):
         candidates = cma.ask()
         fitnesses = [-1.0] * len(candidates)
         results = [None] * len(candidates)
-        eval_args = [(idx, idx % args.workers, candidates[idx], normalize(best_params_a), args.matches, args.timeout) for idx in range(len(candidates))]
+        eval_args = [(idx, idx % args.workers, candidates[idx], args.matches, args.timeout) for idx in range(len(candidates))]
 
         with ProcessPoolExecutor(max_workers=args.workers) as executor:
             futures = {executor.submit(evaluate_candidate, arg): arg[0] for arg in eval_args}
@@ -664,7 +728,7 @@ def train(args):
 
         gen_best_idx = int(np.argmax(fitnesses))
         gen_best_norm = candidates[gen_best_idx]
-        gen_best_fit, gen_best_result = reevaluate_params(gen_best_norm, normalize(best_params_a), f"recheck_gen_{gen+1}", args.elite_matches, args.timeout)
+        gen_best_fit, gen_best_result = reevaluate_params(gen_best_norm, f"recheck_gen_{gen+1}", args.elite_matches, args.timeout)
         gen_best_params = denormalize(gen_best_norm)
 
         improved = False
@@ -674,7 +738,7 @@ def train(args):
             best_params_a = gen_best_params.copy()
             improved = True
         else:
-            incumbent_fit, incumbent_result = reevaluate_params(normalize(best_params_a), normalize(best_params_a), f"incumbent_{gen+1}", args.elite_matches, args.timeout)
+            incumbent_fit, incumbent_result = reevaluate_params(normalize(best_params_a), f"incumbent_{gen+1}", args.elite_matches, args.timeout)
             best_fitness_a = incumbent_fit
 
         stagnant_gens = 0 if improved else (stagnant_gens + 1)
@@ -697,10 +761,10 @@ def train(args):
         log(f"  Global best      : {best_fitness_a:.4f}")
         log(f"  Sigma            : {cma.sigma:.4f}")
         log(f"  Time             : {elapsed:.1f}s")
-        log("  --- Opponent Breakdown ---")
+        log("  --- Opponent Breakdown (dual-side) ---")
         if "per_opp" in gen_best_result:
             for opp_name, o_res in gen_best_result["per_opp"].items():
-                log(f"      vs {opp_name:12} : Fit={o_res['fit']:>6.3f} | WinRate={o_res['win']:>4.2f}")
+                log(f"      vs {opp_name:12} : Fit={o_res['fit']:>6.3f} (A={o_res.get('fit_A',0):>6.3f} B={o_res.get('fit_B',0):>6.3f}) | WinRate={o_res['win']:>4.2f} (A={o_res.get('win_A',0):>4.2f} B={o_res.get('win_B',0):>4.2f})")
         log("  --------------------------")
 
         history.append({

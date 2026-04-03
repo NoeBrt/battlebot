@@ -11,14 +11,15 @@ Usage:
 """
 
 import argparse
+import atexit
 import json
 import math
+import multiprocessing
 import os
 import re
 import shutil
 import subprocess
 import time
-import uuid
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
@@ -42,9 +43,9 @@ PARAM_SPEC = [
     ("TGT_LAST_HIT_BONUS",  150.0,   0,  400,  False),
 
     # Main Utility Weights (16)
-    ("U_ADVANCE_BASE",        0.4, 0.0, 1.0, False),
+    ("U_ADVANCE_BASE",        0.4, 0.0, 0.7, False),   # capped: advance must not dominate combat
     ("U_ADVANCE_NO_ENEMY",    0.6, 0.0, 1.0, False),
-    ("U_COMBAT_HAS_TARGET",   0.8, 0.0, 1.5, False),
+    ("U_COMBAT_HAS_TARGET",   0.8, 0.6, 1.5, False),  # min=0.6: bot MUST want to fight
     ("U_COMBAT_SAFEFIRE",     0.3, 0.0, 1.0, False),
     ("U_FLANK_BLOCKED_TICKS", 0.5, 0.0, 1.0, False),
     ("U_FLANK_BLOCKED_THRESH", 20,   5,  50, True),
@@ -136,23 +137,60 @@ FIXED_CONSTANTS = {
 
 RL_DIR = Path(__file__).resolve().parent
 SIGMA_MIN = 0.05
-SIGMA_RESTART = 0.40
+SIGMA_RESTART = 0.45
+STAGNATION_EPSILON = 0.015  # minimum meaningful improvement to reset stagnation counter
 TEAM_SIZE = 5.0
 TEAM_TOTAL_HP = 1100.0
 
 TOURNAMENT_OPPONENTS = [
+    # Removed Stage8, MacDuoUltra, MecaMouse — they don't shoot/barely move, biasing fitness signal
     {"name": "MacDuo",     "main": "algorithms.external.MacDuoMain",       "sec": "algorithms.external.MacDuoSecondary",       "weight": 5.0},
     {"name": "Himself",    "main": "algorithms.tbot_b.TBotMainB",          "sec": "algorithms.tbot_b.TBotSecondaryB",           "weight": 3.0},
-    {"name": "MacDuoUltra","main": "algorithms.external.MacDuoUltraMain",  "sec": "algorithms.external.MacDuoUltraSecondary",  "weight": 2.0},
-    {"name": "Stage8",     "main": "algorithms.external.Stage8MainA",      "sec": "algorithms.external.Stage8SecondaryA",       "weight": 2.0},
-    {"name": "MecaMouse",  "main": "algorithms.external.MecaMouseMain",    "sec": "algorithms.external.MecaMouseSecondary",     "weight": 1.5},
-    {"name": "Superhero",  "main": "algorithms.external.SuperheroAMain",   "sec": "algorithms.external.SuperheroASecondary",    "weight": 1.5},
-    {"name": "FifthElem",  "main": "algorithms.external.FifthElementMain", "sec": "algorithms.external.FifthElementSecondary",  "weight": 1.0},
-    {"name": "PrevRLBot",  "main": "algorithms.rl.RLBotMain",              "sec": "algorithms.rl.RLBotSecondary",               "weight": 1.0},
-    {"name": "Claude",     "main": "algorithms.LLMS.ClaudeMain",           "sec": "algorithms.LLMS.ClaudeSecondary",            "weight": 1.0},
-    {"name": "AdaptiveK",  "main": "algorithms.LLMS.AdaptiveKiteMain",     "sec": "algorithms.LLMS.AdaptiveKiteSecondary",      "weight": 1.0},
+    {"name": "Superhero",  "main": "algorithms.external.SuperheroAMain",   "sec": "algorithms.external.SuperheroASecondary",    "weight": 2.0},
+    {"name": "FifthElem",  "main": "algorithms.external.FifthElementMain", "sec": "algorithms.external.FifthElementSecondary",  "weight": 1.5},
+    {"name": "PrevRLBot",  "main": "algorithms.rl.RLBotMain",              "sec": "algorithms.rl.RLBotSecondary",               "weight": 1.5},
+    {"name": "AdaptiveK",  "main": "algorithms.LLMS.AdaptiveKiteMain",     "sec": "algorithms.LLMS.AdaptiveKiteSecondary",      "weight": 1.5},
+    {"name": "NoeBot",     "main": "algorithms.lab.NoeMainBot",            "sec": "algorithms.lab.NoeSecondaryBot",              "weight": 2.0},
     {"name": "Yomi",       "main": "algorithms.YomiMain",                  "sec": "algorithms.YomiSecondary",                    "weight": 4.0},
 ]
+
+# -----------------------------------------------------------------------------
+# CURRICULUM PHASES
+# -----------------------------------------------------------------------------
+
+CURRICULUM_PHASES = [
+    {
+        # TBot can win vs Himself (+1.9) and is close vs PrevRLBot (-1.1)
+        # Clean gradient signal, no instant-kill opponents
+        "name": "Foundation",
+        "opponents": ["Himself", "PrevRLBot"],
+        "promote_fitness": 0.5,    # must genuinely beat this pair
+        "promote_gen": 6,
+    },
+    {
+        # Add medium opponents: kills TBot bots but doesn't insta-wipe
+        "name": "Intermediate",
+        "opponents": ["Himself", "PrevRLBot", "AdaptiveK", "NoeBot", "Superhero"],
+        "promote_fitness": -0.3,
+        "promote_gen": 8,
+    },
+    {
+        # Full gauntlet: adds FifthElem (instant wipe), MacDuo, Yomi
+        "name": "Full",
+        "opponents": None,
+        "promote_fitness": None,
+        "promote_gen": None,
+    },
+]
+
+
+def get_curriculum_opponents(phase_idx: int) -> list:
+    phase = CURRICULUM_PHASES[phase_idx]
+    if phase["opponents"] is None:
+        return TOURNAMENT_OPPONENTS
+    names = set(phase["opponents"])
+    return [opp for opp in TOURNAMENT_OPPONENTS if opp["name"] in names]
+
 
 # -----------------------------------------------------------------------------
 # NORMALIZATION / REPAIR
@@ -178,19 +216,76 @@ def reflect_to_unit(x: np.ndarray) -> np.ndarray:
 # -----------------------------------------------------------------------------
 
 def generate_tbotconfig_java(params: np.ndarray, filepath: Path, class_name: str = "TBotConfig", package_name: str = "algorithms.tbot"):
-    lines = [f"package {package_name};", "", f"public class {class_name} {{"]
+    lines = [
+        f"package {package_name};",
+        "",
+        "import java.lang.reflect.Field;",
+        "import java.nio.file.Files;",
+        "import java.nio.file.Paths;",
+        "import java.util.HashMap;",
+        "import java.util.Map;",
+        "import java.util.regex.Matcher;",
+        "import java.util.regex.Pattern;",
+        "",
+        f"public class {class_name} {{",
+    ]
+    # Tunable params: NOT final so the compiler won't inline them into caller bytecode,
+    # and reflection can override them at runtime from a JSON config file.
     for i, (name, _default, lo, hi, is_int) in enumerate(PARAM_SPEC):
         val = float(np.clip(params[i], lo, hi))
         if is_int:
-            lines.append(f"    public static final int    {name} = {int(round(val))};")
+            lines.append(f"    public static int    {name} = {int(round(val))};")
         else:
-            lines.append(f"    public static final double {name} = {val:.6f};")
+            lines.append(f"    public static double {name} = {val:.6f};")
     lines.append("")
+    # Fixed constants stay final (truly invariant).
     for name, val in FIXED_CONSTANTS.items():
         if isinstance(val, int):
             lines.append(f"    public static final int    {name} = {val};")
         else:
             lines.append(f"    public static final double {name} = {float(val):.6f};")
+    # Static initializer: load JSON config passed via -D{class_name}.configPath
+    lines += [
+        "",
+        "    static {",
+        f'        String p = System.getProperty("{class_name}.configPath");',
+        '        if (p != null && !p.isEmpty()) loadConfig(p);',
+        "    }",
+        "",
+        f"    public static void loadConfig(String path) {{",
+        "        try {",
+        "            String json = new String(Files.readAllBytes(Paths.get(path)));",
+        "            Map<String, Double> params = parseJsonParams(json);",
+        "            int loaded = 0;",
+        "            for (Map.Entry<String, Double> e : params.entrySet()) {",
+        "                try {",
+        f"                    Field f = {class_name}.class.getDeclaredField(e.getKey());",
+        "                    if (f.getType() == int.class) {",
+        "                        f.setInt(null, (int) Math.round(e.getValue())); loaded++;",
+        "                    } else if (f.getType() == double.class) {",
+        "                        f.setDouble(null, e.getValue()); loaded++;",
+        "                    }",
+        "                } catch (NoSuchFieldException ignored) {",
+        "                } catch (IllegalAccessException ex) {",
+        f'                    System.err.println("[{class_name}] Cannot set " + e.getKey());',
+        "                }",
+        "            }",
+        f'            System.out.println("[{class_name}] Loaded " + loaded + " params from " + path);',
+        "        } catch (Exception e) {",
+        f'            System.err.println("[{class_name}] Failed to load " + path + ": " + e.getMessage());',
+        "        }",
+        "    }",
+        "",
+        "    private static Map<String, Double> parseJsonParams(String json) {",
+        "        Map<String, Double> result = new HashMap<>();",
+        '        Matcher m = Pattern.compile("\\"(\\\\w+)\\"\\\\s*:\\\\s*(-?[\\\\d.]+(?:[eE][+-]?\\\\d+)?)").matcher(json);',
+        "        while (m.find()) {",
+        "            try { result.put(m.group(1), Double.parseDouble(m.group(2))); }",
+        "            catch (NumberFormatException ignored) {}",
+        "        }",
+        "        return result;",
+        "    }",
+    ]
     lines.append("}")
     lines.append("")
     filepath.write_text("\n".join(lines))
@@ -339,83 +434,205 @@ def compute_fitness(result: dict, timeout_ms: int = 60000) -> float:
     score_a = float(result.get("scoreA", 0.0))
     score_b = float(result.get("scoreB", 0.0))
     win_a = float(result.get("winRateA", 0.0))
-    dead_a = float(result.get("avgDeadMainA", 0.0) + result.get("avgDeadSecA", 0.0))
-    dead_b = float(result.get("avgDeadMainB", 0.0) + result.get("avgDeadSecB", 0.0))
+    dead_a = float(result.get("avgDeadMainA", 0.0)) + float(result.get("avgDeadSecA", 0.0))
+    dead_b = float(result.get("avgDeadMainB", 0.0)) + float(result.get("avgDeadSecB", 0.0))
     hp_a = float(result.get("avgHpA", 0.0))
     hp_b = float(result.get("avgHpB", 0.0))
     avg_time = float(result.get("avgTimeMs", timeout_ms))
 
-    score_diff = score_a - score_b
-    kill_diff = (dead_b - dead_a) / TEAM_SIZE
-    hp_diff = (hp_a - hp_b) / TEAM_TOTAL_HP
-    survival = 1.0 - dead_a / TEAM_SIZE
+    # Continuous win signal instead of binary cliff (old: 3.0 * win_a)
+    win_signal = 2.0 * win_a - 1.0                       # [-1, +1]
+    score_signal = math.tanh((score_a - score_b) * 0.5)   # [-1, +1] compressed
+    kill_diff = (dead_b - dead_a) / TEAM_SIZE              # [-1, +1]
+    hp_diff = (hp_a - hp_b) / TEAM_TOTAL_HP                # [-1, +1]
+    survival = 1.0 - dead_a / TEAM_SIZE                    # [0, 1]
+    damage_dealt = dead_b / TEAM_SIZE                      # [0, 1] gradient even when losing
 
-    # Speed bonus: faster wins are better. Ranges from 0 (timeout) to 1.0 (instant).
-    # Only rewards speed when winning (no bonus for fast losses).
     speed_bonus = 0.0
     if win_a > 0 and avg_time > 0:
         speed_bonus = win_a * max(0.0, 1.0 - avg_time / timeout_ms)
 
-    return float(3.0 * win_a + 1.25 * score_diff + 0.90 * kill_diff + 0.60 * hp_diff + 0.25 * survival + 0.50 * speed_bonus)
+    return float(
+        1.5 * win_signal
+        + 1.0 * score_signal
+        + 0.8 * kill_diff
+        + 0.6 * hp_diff
+        + 0.4 * survival
+        + 0.5 * damage_dealt
+        + 0.3 * speed_bonus
+    )
 
 
 # -----------------------------------------------------------------------------
-# WORKER SETUP / EVALUATION
+# PERSISTENT WORKER POOL (compile once, reuse across all candidates)
 # -----------------------------------------------------------------------------
 
-def setup_worker(worker_id) -> Path:
-    worker_dir = RL_DIR / "rl_workers" / f"worker_{worker_id}"
-    worker_dir.mkdir(parents=True, exist_ok=True)
+# Global worker queue — populated by pool initializer, used by evaluate_candidate
+_worker_queue = None
 
-    for name in ["jars", "avatars", "META-INF"]:
-        link = worker_dir / name
-        target = RL_DIR / name
-        if target.exists():
-            if link.is_symlink() or link.exists():
-                if link.is_dir() and not link.is_symlink():
-                    shutil.rmtree(link)
-                else:
-                    link.unlink()
-            link.symlink_to(target)
 
-    src_dst = worker_dir / "src"
-    if src_dst.exists():
-        shutil.rmtree(src_dst)
-    shutil.copytree(RL_DIR / "src", src_dst)
-    return worker_dir
+def _init_pool(queue):
+    """ProcessPoolExecutor initializer: store the shared worker queue."""
+    global _worker_queue
+    _worker_queue = queue
 
+
+def init_persistent_workers(n_workers: int) -> list:
+    """Create N persistent worker directories, each compiled once.
+
+    Returns list of worker directory Paths.
+    """
+    workers_root = RL_DIR / "rl_workers"
+    workers_root.mkdir(exist_ok=True)
+    workers = []
+
+    for i in range(n_workers):
+        worker_dir = workers_root / f"worker_{i}"
+
+        # Clean up any stale worker from a previous run
+        if worker_dir.exists():
+            shutil.rmtree(worker_dir)
+        worker_dir.mkdir(parents=True)
+
+        # Symlink shared resources
+        for name in ["jars", "avatars", "META-INF"]:
+            target = RL_DIR / name
+            if target.exists():
+                (worker_dir / name).symlink_to(target)
+
+        # Copy source tree ONCE
+        shutil.copytree(RL_DIR / "src", worker_dir / "src")
+
+        # Build tbot_a (candidate) and tbot_b (self-play opponent) packages
+        build_team_sources(worker_dir, team_pkg="tbot_a", suffix="A", config_class="TBotConfigA")
+        build_team_sources(worker_dir, team_pkg="tbot_b", suffix="B", config_class="TBotConfigB")
+
+        # Generate placeholder configs (values don't matter — overridden at runtime via JSON)
+        generate_tbotconfig_java(PARAM_DEFAULT,
+                                 worker_dir / "src" / "algorithms" / "tbot_a" / "TBotConfigA.java",
+                                 "TBotConfigA", "algorithms.tbot_a")
+        generate_tbotconfig_java(PARAM_DEFAULT,
+                                 worker_dir / "src" / "algorithms" / "tbot_b" / "TBotConfigB.java",
+                                 "TBotConfigB", "algorithms.tbot_b")
+
+        # Full compile ONCE
+        if not compile_java(worker_dir):
+            raise RuntimeError(f"Initial compilation failed for worker_{i}")
+
+        # Create logs dir
+        (worker_dir / "tbot_logs").mkdir(exist_ok=True)
+
+        workers.append(worker_dir)
+        print(f"  Worker {i} ready: {worker_dir}")
+
+    return workers
+
+
+def cleanup_workers(workers: list):
+    """Remove persistent worker directories."""
+    for w in workers:
+        if w.exists():
+            shutil.rmtree(w, ignore_errors=True)
+
+
+def write_config_json(params: np.ndarray, filepath: Path):
+    """Write candidate params as flat JSON for runtime loading by TBotConfig."""
+    data = {}
+    for i, (name, _default, lo, hi, is_int) in enumerate(PARAM_SPEC):
+        val = float(np.clip(params[i], lo, hi))
+        data[name] = int(round(val)) if is_int else round(val, 6)
+    for name, val in FIXED_CONSTANTS.items():
+        data[name] = val
+    filepath.write_text(json.dumps(data))
+
+
+# -----------------------------------------------------------------------------
+# MATCH EXECUTION (zero-recompilation: team classes passed via -D flags)
+# -----------------------------------------------------------------------------
+
+def run_match_fast(work_dir: Path, n_matches: int, timeout_ms: int,
+                   team_a_main: str, team_a_sec: str,
+                   team_b_main: str, team_b_sec: str,
+                   config_a_path: str, config_b_path: str) -> dict:
+    """Run matches passing team classes and configs via JVM system properties.
+
+    No compilation needed — Parameters reads -Dteam.* at startup,
+    TBotConfigA/B read their configs from -DTBotConfigA.configPath / -DTBotConfigB.configPath.
+    """
+    jars = work_dir / "jars"
+    beans = work_dir / "beans"
+    log_dir = work_dir / "tbot_logs"
+
+    java_cmd = [
+        "java",
+        f"-Dteam.a.main={team_a_main}",
+        f"-Dteam.a.sec={team_a_sec}",
+        f"-Dteam.b.main={team_b_main}",
+        f"-Dteam.b.sec={team_b_sec}",
+        f"-DTBotConfigA.configPath={config_a_path}",
+        f"-DTBotConfigB.configPath={config_b_path}",
+        "-Drl.quiet=true",
+        "-cp", f"{jars}/*:{beans}",
+        "supportGUI.HeadlessMatchRunner",
+        str(n_matches), str(timeout_ms), "0", str(log_dir),
+    ]
+
+    cmd = ["xvfb-run", "-a"] + java_cmd if shutil.which("xvfb-run") and not os.environ.get("DISPLAY") else java_cmd
+
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True,
+            cwd=str(work_dir), timeout=(timeout_ms / 1000.0 * n_matches + 60))
+        output = result.stdout + result.stderr
+    except subprocess.TimeoutExpired:
+        return {"scoreA": 0.0, "scoreB": 0.0, "winRateA": 0.0,
+                "avgDeadMainA": 0.0, "avgDeadSecA": 0.0,
+                "avgDeadMainB": 0.0, "avgDeadSecB": 0.0,
+                "avgHpA": 0.0, "avgHpB": 0.0, "error": "timeout"}
+
+    return parse_match_output(output)
+
+
+# -----------------------------------------------------------------------------
+# CANDIDATE EVALUATION (persistent workers, no compilation)
+# -----------------------------------------------------------------------------
 
 def evaluate_candidate(args):
-    candidate_idx, worker_id, norm_a, norm_prev, n_matches, timeout_ms = args
-    unique_worker_id = f"{worker_id}_{uuid.uuid4().hex[:8]}"
-    worker_dir = setup_worker(unique_worker_id)
+    """Evaluate a single candidate against all tournament opponents.
+
+    Uses a persistent worker directory from the shared pool.
+    Only writes JSON config files — no Java generation or compilation.
+    """
+    candidate_idx, norm_a, norm_prev, n_matches, timeout_ms, active_opponents = args
+
+    # Acquire a worker from the pool
+    worker_dir = _worker_queue.get()
 
     try:
         real_a = denormalize(norm_a)
         real_prev = denormalize(norm_prev)
 
-        # Team A: the candidate
-        build_team_sources(worker_dir, team_pkg="tbot_a", suffix="A", config_class="TBotConfigA")
-        generate_tbotconfig_java(real_a, worker_dir / "src" / "algorithms" / "tbot_a" / "TBotConfigA.java", "TBotConfigA", "algorithms.tbot_a")
-
-        # Team B (for self-play): previous best
-        build_team_sources(worker_dir, team_pkg="tbot_b", suffix="B", config_class="TBotConfigB")
-        generate_tbotconfig_java(real_prev, worker_dir / "src" / "algorithms" / "tbot_b" / "TBotConfigB.java", "TBotConfigB", "algorithms.tbot_b")
-
-        if not compile_java(worker_dir):
-            return candidate_idx, -10.0, {"error": "compile_failed"}
+        # Write candidate configs as JSON (replaces Java code generation + compilation)
+        config_a = worker_dir / "configA.json"
+        config_b = worker_dir / "configB.json"
+        write_config_json(real_a, config_a)
+        write_config_json(real_prev, config_b)
 
         total_fitness = 0.0
         total_weight = 0.0
         results_agg = {"winRateA": 0.0, "scoreA": 0.0, "scoreB": 0.0,
                        "avgHpA": 0.0, "avgHpB": 0.0, "per_opp": {}}
 
-        for opp in TOURNAMENT_OPPONENTS:
-            patch_parameters_for_duel(worker_dir, opp["main"], opp["sec"])
-            if not compile_java(worker_dir):
-                continue
+        for opp in active_opponents:
+            res = run_match_fast(
+                worker_dir, n_matches=n_matches, timeout_ms=timeout_ms,
+                team_a_main="algorithms.tbot_a.TBotMainA",
+                team_a_sec="algorithms.tbot_a.TBotSecondaryA",
+                team_b_main=opp["main"],
+                team_b_sec=opp["sec"],
+                config_a_path=str(config_a),
+                config_b_path=str(config_b))
 
-            res = run_match(worker_dir, n_matches=n_matches, timeout_ms=timeout_ms)
             if res.get("error"):
                 continue
 
@@ -443,12 +660,19 @@ def evaluate_candidate(args):
         print(f"Exception in worker: {e}")
         return candidate_idx, -10.0, {"error": "exception"}
     finally:
-        if worker_dir.exists():
-            shutil.rmtree(worker_dir, ignore_errors=True)
+        # Return worker to pool (NOT deleted)
+        _worker_queue.put(worker_dir)
 
 
-def reevaluate_params(norm_a, norm_prev, worker_id, n_matches, timeout_ms):
-    _, fitness, result = evaluate_candidate((-1, worker_id, norm_a, norm_prev, n_matches, timeout_ms))
+def reevaluate_params(norm_a, norm_prev, n_matches, timeout_ms, active_opponents, worker_queue=None):
+    """Re-evaluate params using the worker pool.
+
+    Can be called from main process (needs worker_queue param) or from pool worker.
+    """
+    global _worker_queue
+    if worker_queue is not None:
+        _worker_queue = worker_queue
+    _, fitness, result = evaluate_candidate((-1, norm_a, norm_prev, n_matches, timeout_ms, active_opponents))
     return fitness, result
 
 
@@ -587,6 +811,7 @@ def train(args):
     print("=" * 70)
     print("  CMA-ES trainer for TacticalBot (TBot)")
     print(f"  {N_PARAMS} parameters, tournament mode")
+    print("  [FAST] Persistent workers, zero recompilation per candidate")
     print("=" * 70)
 
     results_dir = RL_DIR / "rl_results"
@@ -612,6 +837,25 @@ def train(args):
     if args.resume_a:
         log(f"Base config: {args.resume_a}")
 
+    # --- Initialize persistent workers (compile once) ---
+    log(f"\nInitializing {args.workers} persistent workers...")
+    t_init = time.time()
+    workers = init_persistent_workers(args.workers)
+    log(f"Workers ready in {time.time() - t_init:.1f}s (compiled once, reused for all generations)")
+
+    # Shared worker queue for cross-process access
+    manager = multiprocessing.Manager()
+    worker_queue = manager.Queue()
+    for w in workers:
+        worker_queue.put(w)
+
+    # Cleanup on exit (only in main process — avoid fork-inherited atexit in pool workers)
+    _main_pid = os.getpid()
+    def _safe_cleanup():
+        if os.getpid() == _main_pid:
+            cleanup_workers(workers)
+    atexit.register(_safe_cleanup)
+
     resumed = load_resume_params(args.resume_a)
     start_real = resumed if resumed is not None else PARAM_DEFAULT
     start_norm = normalize(start_real)
@@ -621,18 +865,26 @@ def train(args):
     best_params_a = denormalize(start_norm)
     history = []
     stagnant_gens = 0
+    curriculum_phase = len(CURRICULUM_PHASES) - 1 if getattr(args, "no_curriculum", False) else 0
+    gens_in_phase = 0
 
     for gen in range(args.generations):
         t0 = time.time()
-        log(f"\n--- Generation {gen + 1}/{args.generations} ---")
+
+        # Curriculum: determine active opponents for this generation
+        active_opponents = get_curriculum_opponents(curriculum_phase)
+        phase_name = CURRICULUM_PHASES[curriculum_phase]["name"]
+        log(f"\n--- Generation {gen + 1}/{args.generations} [Curriculum: {phase_name}, {len(active_opponents)} opps] ---")
 
         candidates = cma.ask()
         fitnesses = [-1.0] * len(candidates)
         results = [None] * len(candidates)
-        eval_args = [(idx, idx % args.workers, candidates[idx], normalize(best_params_a),
-                       args.matches, args.timeout) for idx in range(len(candidates))]
+        eval_args = [(idx, candidates[idx], normalize(best_params_a),
+                       args.matches, args.timeout, active_opponents) for idx in range(len(candidates))]
 
-        with ProcessPoolExecutor(max_workers=args.workers) as executor:
+        with ProcessPoolExecutor(max_workers=args.workers,
+                                 initializer=_init_pool,
+                                 initargs=(worker_queue,)) as executor:
             futures = {executor.submit(evaluate_candidate, arg): arg[0] for arg in eval_args}
             for future in as_completed(futures):
                 idx = futures[future]
@@ -650,26 +902,44 @@ def train(args):
         gen_best_norm = candidates[gen_best_idx]
         gen_best_fit, gen_best_result = reevaluate_params(
             gen_best_norm, normalize(best_params_a),
-            f"recheck_gen_{gen+1}", args.elite_matches, args.timeout)
+            args.elite_matches, args.timeout, active_opponents, worker_queue=worker_queue)
         gen_best_params = denormalize(gen_best_norm)
 
-        improved = False
-        if gen_best_fit > best_fitness_a:
+        # Improvement check with epsilon threshold — prevents noisy micro-improvements
+        # from resetting the stagnation counter (the core bug of previous runs).
+        # We do NOT re-evaluate the incumbent when not improved: that re-eval was
+        # overwriting best_fitness_a with a noisy value, causing false resets.
+        improved = gen_best_fit > best_fitness_a + STAGNATION_EPSILON
+        if improved:
             best_fitness_a = gen_best_fit
             best_params_a = gen_best_params.copy()
-            improved = True
-        else:
-            incumbent_fit, _ = reevaluate_params(
-                normalize(best_params_a), normalize(best_params_a),
-                f"incumbent_{gen+1}", args.elite_matches, args.timeout)
-            best_fitness_a = incumbent_fit
 
         stagnant_gens = 0 if improved else (stagnant_gens + 1)
         if cma.sigma < SIGMA_MIN or stagnant_gens >= args.restart_stagnation:
             why = f"sigma collapse ({cma.sigma:.4f})" if cma.sigma < SIGMA_MIN else f"stagnation ({stagnant_gens} gens)"
             log(f"  [CMA] Restart due to {why}")
-            cma = CMAES(normalize(best_params_a), sigma0=SIGMA_RESTART, pop_size=args.pop)
+            jitter = np.random.randn(N_PARAMS) * 0.05
+            restart_point = normalize(best_params_a) + jitter
+            cma = CMAES(restart_point, sigma0=SIGMA_RESTART, pop_size=args.pop)
             stagnant_gens = 0
+
+        # Curriculum phase promotion
+        gens_in_phase += 1
+        phase_cfg = CURRICULUM_PHASES[curriculum_phase]
+        if phase_cfg["promote_fitness"] is not None and curriculum_phase < len(CURRICULUM_PHASES) - 1:
+            if best_fitness_a >= phase_cfg["promote_fitness"]:
+                old_phase = curriculum_phase
+                curriculum_phase += 1
+                gens_in_phase = 0
+                stagnant_gens = 0
+                best_fitness_a = -float("inf")  # reset: fitness scale changes with new opponents
+                log(f"  [CURRICULUM] -> '{CURRICULUM_PHASES[curriculum_phase]['name']}' (fitness {gen_best_fit:.3f} >= {phase_cfg['promote_fitness']})")
+            elif phase_cfg["promote_gen"] and gens_in_phase >= phase_cfg["promote_gen"]:
+                curriculum_phase += 1
+                gens_in_phase = 0
+                stagnant_gens = 0
+                best_fitness_a = -float("inf")  # reset: fitness scale changes with new opponents
+                log(f"  [CURRICULUM] -> '{CURRICULUM_PHASES[curriculum_phase]['name']}' (spent {phase_cfg['promote_gen']} gens in phase)")
 
         elapsed = time.time() - t0
         log(f"  Gen best fitness : {gen_best_fit:.4f}")
@@ -688,6 +958,7 @@ def train(args):
             "gen_best_a": float(gen_best_fit),
             "sigma_a": float(cma.sigma),
             "winRateA": float(gen_best_result.get("winRateA", 0.0)),
+            "curriculum_phase": curriculum_phase,
         })
         save_checkpoint(run_dir, gen + 1, best_params_a, best_fitness_a, history)
 
@@ -696,23 +967,26 @@ def train(args):
     log(f"\nBest fitness: {best_fitness_a:.4f}")
     log(f"Best config: {run_dir / 'best_policy'}")
     live_log.close()
+    cleanup_workers(workers)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="CMA-ES trainer for TacticalBot")
     parser.add_argument("--generations", type=int, default=40)
     parser.add_argument("--pop", type=int, default=48)
-    parser.add_argument("--matches", type=int, default=5)
-    parser.add_argument("--elite-matches", type=int, default=11)
+    parser.add_argument("--matches", type=int, default=3)
+    parser.add_argument("--elite-matches", type=int, default=7)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--timeout", type=int, default=30000)
     parser.add_argument("-c", "--base-config", dest="resume_a", type=str, default=None,
                         help="JSON checkpoint to seed initial params from")
-    parser.add_argument("--sigma0", type=float, default=0.30)
+    parser.add_argument("--sigma0", type=float, default=0.50)
     parser.add_argument("--sigma-min", type=float, default=None)
     parser.add_argument("--sigma-restart", type=float, default=None)
-    parser.add_argument("--restart-stagnation", type=int, default=5)
+    parser.add_argument("--restart-stagnation", type=int, default=3)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--no-curriculum", action="store_true", default=False,
+                        help="Disable curriculum training, use all opponents from start")
     args = parser.parse_args()
 
     if args.sigma_min is not None:

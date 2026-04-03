@@ -77,20 +77,21 @@ def resolve_opponent(name):
 
 def set_opponent(name):
     """Patch Parameters.java to set the Team B opponent.
-    Requires recompilation afterwards (Java inlines static final Strings)."""
+    With non-final fields, recompilation is technically optional (system properties
+    can override at runtime), but we recompile for consistency with manual ./run usage."""
     name = resolve_opponent(name)
     main_cls, sec_cls = OPPONENTS[name]
     p = ROOT / "src" / "characteristics" / "Parameters.java"
     txt = p.read_text()
 
     txt = re.sub(
-        r'(public static final String teamBName = )".*?"',
+        r'(public static (?:final )?String teamBName = )".*?"',
         f'\\1"{name}"', txt)
     txt = re.sub(
-        r'(public static final String teamBMainBotBrainClassName = )".*?"',
+        r'(public static (?:final )?String teamBMainBotBrainClassName = )".*?"',
         f'\\1"{main_cls}"', txt)
     txt = re.sub(
-        r'(public static final String teamBSecondaryBotBrainClassName = )".*?"',
+        r'(public static (?:final )?String teamBSecondaryBotBrainClassName = )".*?"',
         f'\\1"{sec_cls}"', txt)
 
     p.write_text(txt)
@@ -109,8 +110,7 @@ def get_current_opponent():
 # Compilation
 # ---------------------------------------------------------------------------
 def compile_all():
-    """Clean compile all Java sources. Full rebuild needed because javac
-    inlines 'public static final String' constants from Parameters.java."""
+    """Clean compile all Java sources."""
     beans = ROOT / "beans"
     if beans.exists():
         shutil.rmtree(beans)
@@ -122,7 +122,7 @@ def compile_all():
 
     result = subprocess.run(
         ["javac", "-cp", f"{ROOT}/jars/*", "-d", str(beans),
-         "--release", "11", f"@{sources_file}"],
+         "--release", "17", f"@{sources_file}"],
         capture_output=True, text=True, cwd=str(ROOT), timeout=60)
 
     sources_file.unlink(missing_ok=True)
@@ -147,16 +147,17 @@ def needs_compile(opponent_changed):
 # Match execution
 # ---------------------------------------------------------------------------
 def build_java_cmd(config=None):
-    """Build the base java command, optionally with -Drl.config."""
+    """Build the base java command, optionally with config path for both RLConfig and TBotConfig."""
     cmd = ["java"]
     if config:
         abspath = str(Path(config).resolve())
         cmd.append(f"-Drl.config={abspath}")
+        cmd.append(f"-DTBotConfig.configPath={abspath}")
     cmd.extend(["-cp", f"{ROOT}/jars/*:{ROOT}/beans"])
     return cmd
 
 
-def run_headless(matches=5, timeout=90000, delay=1, log_dir="logs",
+def run_headless(matches=5, timeout=90000, delay=0, log_dir="logs",
                  config=None, capture=False):
     """Run HeadlessMatchRunner. Returns stdout if capture=True."""
     (ROOT / log_dir).mkdir(exist_ok=True)
@@ -197,7 +198,7 @@ def parse_summary(output):
     return r
 
 
-def run_record(output_path, config=None):
+def run_record(output_path, config=None, delay=1):
     """Record a match to MP4 via xvfb + ffmpeg."""
     if not shutil.which("ffmpeg"):
         print("Error: ffmpeg required for recording")
@@ -209,14 +210,14 @@ def run_record(output_path, config=None):
     java_opts = ""
     if config:
         abspath = str(Path(config).resolve())
-        java_opts = f"-Drl.config={abspath} "
+        java_opts = f"-Drl.config={abspath} -DTBotConfig.configPath={abspath} "
 
     script = (
         f'ffmpeg -y -nostdin -f x11grab -draw_mouse 0 -framerate 30 '
         f'-video_size 1280x720 -i :${{DISPLAY##*:}} '
         f'-c:v libx264 -pix_fmt yuv420p -preset ultrafast {output_path} & PID=$!; '
         f'sleep 2; java {java_opts}-cp {ROOT}/jars/*:{ROOT}/beans '
-        f'supportGUI.AutoRecordingViewer; kill $PID'
+        f'supportGUI.AutoRecordingViewer 300000 {delay}; kill $PID'
     )
     subprocess.run(
         ["xvfb-run", "-a", "-s", "-screen 0 1280x720x24", "bash", "-c", script],
@@ -305,7 +306,7 @@ def cmd_record(args):
             sys.exit(1)
         print(f"Config: {p}")
 
-    run_record(args.output, config=args.config)
+    run_record(args.output, config=args.config, delay=args.delay)
 
 
 def cmd_list(args):
@@ -386,6 +387,7 @@ examples:
     p.add_argument("output", help="output.mp4")
     p.add_argument("-o", "--opponent", help="Opponent name")
     p.add_argument("-c", "--config", help="Path to JSON config from training")
+    p.add_argument("-d", "--delay", type=int, default=1, help="tick delay ms (lower is faster, 0=max speed)")
 
     # list
     sub.add_parser("list", help="List opponents and config files")
