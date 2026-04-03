@@ -17,7 +17,7 @@ find src -name "*.java" > sources.txt
 
 echo "Compiling sources..."
 # Compile with backwards compatibility for Java 11 (fixes class version 68.0 errors)
-javac -cp "jars/*" -d beans --release 11 @sources.txt
+javac -cp "jars/*" -d beans @sources.txt
 
 # Remove temporary file list
 rm sources.txt
