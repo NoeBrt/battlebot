@@ -74,7 +74,22 @@ class BotState {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
- *  RLConfig
+ *  RLConfig -- GEN 4 ()
+ *  --- Generation 4/40 ---
+ *  Gen best fitness : 2.6672
+ *  Gen best score   : A=0.6971 B=0.5886
+ *  Gen best winRate : 0.7883
+ *  Global best      : 2.6672
+ *  Sigma            : 0.2424
+ *  Time             : 31915.4s
+ *  --- Opponent Breakdown (dual-side) ---
+ *      vs Yomi         : Fit= 3.325 (A= 3.844 B= 2.806) | WinRate=0.93 (A=1.00 B=0.86)
+ *      vs MacDuo       : Fit= 1.179 (A= 3.558 B=-1.199) | WinRate=0.50 (A=1.00 B=0.00)
+ *      vs NoeBot       : Fit= 3.239 (A= 3.239 B= 3.239) | WinRate=1.00 (A=1.00 B=1.00)
+ *      vs Superhero    : Fit= 4.431 (A= 4.028 B= 4.835) | WinRate=1.00 (A=1.00 B=1.00)
+ *      vs AdaptiveK    : Fit= 1.540 (A=-0.189 B= 3.269) | WinRate=0.50 (A=0.00 B=1.00)
+ *  --------------------------
+ *
  * ═══════════════════════════════════════════════════════════════════════════*/
 class RLConfig {
 
