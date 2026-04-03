@@ -214,7 +214,7 @@ public class NoeMainBot extends NoeAbstractBot {
     if (newState == DODGE) dodgeSteps = 5;
     if (newState == REPOSITION) {
       Parameters.Direction repositionDir;
-      repositionSteps = 100;
+      repositionSteps = 125;
       repositionDir = Parameters.Direction.LEFT;
       lateralAngle = normalizeAngle(angleTo(targetX(), targetY()) + Math.PI / 2
         * (repositionDir == Parameters.Direction.RIGHT ? 1 : -1));
